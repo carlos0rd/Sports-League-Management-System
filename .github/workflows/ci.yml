@@ -1,0 +1,54 @@
+name: Flask Sports League CI
+
+# El pipeline se activará con cualquier push o pull request en estas ramas
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Descargar el código del repositorio
+    - name: Checkout del código
+      uses: actions/checkout@v4
+
+    # 2. Configurar el entorno de Python
+    - name: Configurar Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    # 3. Cachear las dependencias de Pip para que corra más rápido en las siguientes ejecuciones
+    - name: Cachear dependencias de Pip
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    # 4. Instalar las librerías de requirements.txt
+    - name: Instalar dependencias
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest flake8 # Herramientas de pruebas y calidad de código
+
+    # 5. Verificar que no haya errores de sintaxis en el código Python
+    - name: Validar sintaxis con Flake8
+      run: |
+        # Detiene el proceso si encuentra errores de sintaxis graves
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+    # 6. Ejecutar tus pruebas automatizadas
+    - name: Ejecutar pruebas (Tests)
+      run: |
+        # Si se usa el framework nativo de Python (unittest):
+        python -m unittest discover -s tests
+        
+        # Si se usar pytest, borrar la línea de arriba y descomentar la de abajo:
+        # pytest
