@@ -57,9 +57,13 @@
                             </span>
                         </td>
                         <td>
-                            <button class="btn btn-success btn-sm" onclick="editUser('{{ user[0] }}', '{{ user[2] }}')">
-                                <i class="fa fa-pencil-alt"></i>
-                            </button>
+                            <button
+    type="button"
+    class="btn btn-success btn-sm edit-user-btn"
+    data-id="{{ user[0] }}"
+    data-is-admin="{% if user[2] %}true{% else %}false{% endif %}">
+    <i class="fa fa-pencil-alt"></i>
+</button>
                         </td>
                     </tr>
                     {% endfor %}
@@ -70,11 +74,17 @@
     </div>
 
 <script>
-    function editUser(id, isAdmin) {
-        document.getElementById('user_id').value = id;
-        document.getElementById('is_admin').value = isAdmin ? 'true' : 'false';
-        document.getElementById('submit-button').innerText = 'Update Privilege';
-        document.getElementById('form-title').innerText = 'Edit User Privilege';
-    }
+    document.querySelectorAll('.edit-user-btn').forEach(function(button) {
+        button.addEventListener('click', function() {
+            const id = this.getAttribute('data-id');
+            const isAdmin = this.getAttribute('data-is-admin');
+
+            document.getElementById('user_id').value = id;
+            document.getElementById('is_admin').value = isAdmin || 'false';
+
+            document.getElementById('submit-button').innerText = 'Update Privilege';
+            document.getElementById('form-title').innerText = 'Edit User Privilege';
+        });
+    });
 </script>
 {% endblock %}
