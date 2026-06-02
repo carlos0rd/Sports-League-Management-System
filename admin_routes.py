@@ -1796,54 +1796,268 @@ def manage_standings():
 
     if request.method == 'POST':
         try:
-            standing_id = request.form.get('standing_id')
-            position = request.form['position']
-            team_id = request.form['team_id']
-            played_games = request.form['played_games']
-            won = request.form['won']
-            draw = request.form['draw']
-            lost = request.form['lost']
-            points = request.form['points']
-            goals_for = request.form['goals_for']
-            goals_against = request.form['goals_against']
-            goal_difference = request.form['goal_difference']
-            form = request.form['form']
+            if 'delete' in request.form:
+                standing_id = (
+                    request.form.get('deleteItemId')
+                    or request.form.get('deleteEntityId')
+                    or request.form.get('item_id')
+                    or request.form.get('standing_id')
+                )
 
-            if 'add' in request.form:
-                cur.execute('''
-                    INSERT INTO standings (position, team_id, played_games, won, draw, lost, points, goals_for, goals_against, goal_difference, form)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ''', (position, team_id, played_games, won, draw, lost, points, goals_for, goals_against, goal_difference, form))
-                flash('Standing added successfully', 'success')
-            elif 'edit' in request.form and standing_id:
-                cur.execute('''
-                    UPDATE standings
-                    SET position = %s, team_id = %s, played_games = %s, won = %s, draw = %s, lost = %s, points = %s, goals_for = %s, goals_against = %s, goal_difference = %s, form = %s
-                    WHERE standing_id = %s
-                ''', (position, team_id, played_games, won, draw, lost, points, goals_for, goals_against, goal_difference, form, standing_id))
-                flash('Standing updated successfully', 'success')
-            elif 'delete' in request.form:
-                standing_id = request.form['deleteItemId']
-                cur.execute('DELETE FROM standings WHERE standing_id = %s', (standing_id,))
+                if not standing_id:
+                    flash('No standing selected for deletion', 'error')
+                    return redirect(url_for('admin.manage_standings'))
+
+                cur.execute("DELETE FROM standings WHERE standing_id = %s", (standing_id,))
                 flash('Standing deleted successfully', 'success')
+
+            else:
+                standing_id = request.form.get('standing_id')
+                position = clean_int(request.form.get('position'))
+                team_id = clean_value(request.form.get('team_id'))
+                league_id = clean_value(request.form.get('league_id'))
+                season_id = clean_value(request.form.get('season_id'))
+                played_games = clean_int(request.form.get('played_games'))
+                won = clean_int(request.form.get('won'))
+                draw = clean_int(request.form.get('draw'))
+                lost = clean_int(request.form.get('lost'))
+                points = clean_int(request.form.get('points'))
+                goals_for = clean_int(request.form.get('goals_for'))
+                goals_against = clean_int(request.form.get('goals_against'))
+                goal_difference = clean_int(request.form.get('goal_difference'))
+                form = clean_value(request.form.get('form'))
+
+                if form:
+                    form = form.strip().upper()
+
+                    if form.startswith("{") and form.endswith("}"):
+                        form = form
+                    else:
+                        form = form.replace("[", "")
+                        form = form.replace("]", "")
+                        form = form.replace("'", "")
+                        form = form.replace('"', "")
+                        form = form.replace(",", "")
+                        form = form.replace(" ", "")
+                        form = "{" + ",".join(list(form)) + "}"
+
+                if not team_id:
+                    flash('Team is required', 'error')
+                    return redirect(url_for('admin.manage_standings'))
+
+                if not league_id:
+                    flash('League is required', 'error')
+                    return redirect(url_for('admin.manage_standings'))
+
+                if not season_id:
+                    flash('Season is required', 'error')
+                    return redirect(url_for('admin.manage_standings'))
+
+                number_values = [
+                    position,
+                    played_games,
+                    won,
+                    draw,
+                    lost,
+                    points,
+                    goals_for,
+                    goals_against,
+                    goal_difference
+                ]
+
+                if any(value is None for value in number_values):
+                    flash('All numeric fields are required', 'error')
+                    return redirect(url_for('admin.manage_standings'))
+
+                non_negative_values = [
+                    position,
+                    played_games,
+                    won,
+                    draw,
+                    lost,
+                    points,
+                    goals_for,
+                    goals_against
+                ]
+
+                if any(value is not None and value < 0 for value in non_negative_values):
+                    flash('Numeric values cannot be negative.', 'warning')
+                    return redirect(url_for('admin.manage_standings'))
+
+                if position is not None and position < 1:
+                    flash('Position must be at least 1.', 'warning')
+                    return redirect(url_for('admin.manage_standings'))
+
+                if (
+                    played_games is not None
+                    and won is not None
+                    and draw is not None
+                    and lost is not None
+                    and played_games != won + draw + lost
+                ):
+                    flash('Played games must be equal to won + draw + lost.', 'warning')
+                    return redirect(url_for('admin.manage_standings'))
+
+                if (
+                    goals_for is not None
+                    and goals_against is not None
+                    and goal_difference is not None
+                    and goal_difference != goals_for - goals_against
+                ):
+                    flash('Goal difference must be goals for minus goals against.', 'warning')
+                    return redirect(url_for('admin.manage_standings'))
+
+                if standing_id:
+                    cur.execute("""
+                        SELECT standing_id
+                        FROM standings
+                        WHERE team_id = %s
+                          AND league_id = %s
+                          AND season_id = %s
+                          AND standing_id <> %s
+                    """, (team_id, league_id, season_id, standing_id))
+                else:
+                    cur.execute("""
+                        SELECT standing_id
+                        FROM standings
+                        WHERE team_id = %s
+                          AND league_id = %s
+                          AND season_id = %s
+                    """, (team_id, league_id, season_id))
+
+                existing = cur.fetchone()
+
+                if existing:
+                    flash('This team already has a standing record for the selected league and season.', 'warning')
+                    return redirect(url_for('admin.manage_standings'))
+
+                if standing_id:
+                    cur.execute("""
+                        UPDATE standings
+                        SET league_id = %s,
+                            season_id = %s,
+                            position = %s,
+                            team_id = %s,
+                            played_games = %s,
+                            won = %s,
+                            draw = %s,
+                            lost = %s,
+                            points = %s,
+                            goals_for = %s,
+                            goals_against = %s,
+                            goal_difference = %s,
+                            form = %s
+                        WHERE standing_id = %s
+                    """, (
+                        league_id,
+                        season_id,
+                        position,
+                        team_id,
+                        played_games,
+                        won,
+                        draw,
+                        lost,
+                        points,
+                        goals_for,
+                        goals_against,
+                        goal_difference,
+                        form,
+                        standing_id
+                    ))
+                    flash('Standing updated successfully', 'success')
+                else:
+                    cur.execute("""
+                        INSERT INTO standings
+                            (league_id, season_id, position, team_id, played_games,
+                             won, draw, lost, points, goals_for, goals_against,
+                             goal_difference, form)
+                        VALUES
+                            (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        league_id,
+                        season_id,
+                        position,
+                        team_id,
+                        played_games,
+                        won,
+                        draw,
+                        lost,
+                        points,
+                        goals_for,
+                        goals_against,
+                        goal_difference,
+                        form
+                    ))
+                    flash('Standing added successfully', 'success')
+
             db.commit()
+
         except Exception as e:
             db.rollback()
             flash('An error occurred: ' + str(e), 'error')
+
         finally:
             cur.close()
+
         return redirect(url_for('admin.manage_standings'))
 
-    cur.execute('''
-        SELECT s.standing_id, s.position, t.name, s.played_games, s.won, s.draw, s.lost, s.points, s.goals_for, s.goals_against, s.goal_difference, s.form, s.team_id
+    cur.execute("""
+        SELECT
+            s.standing_id,
+            s.position,
+            t.name AS team_name,
+            s.played_games,
+            s.won,
+            s.draw,
+            s.lost,
+            s.points,
+            s.goals_for,
+            s.goals_against,
+            s.goal_difference,
+            COALESCE(array_to_string(s.form, ''), '') AS form,
+            s.team_id,
+            s.league_id,
+            s.season_id,
+            l.name AS league_name,
+            se.year AS season_year
         FROM standings s
         JOIN teams t ON s.team_id = t.team_id
-    ''')
+        JOIN leagues l ON s.league_id = l.league_id
+        JOIN seasons se ON s.season_id = se.season_id
+        ORDER BY l.name ASC, se.year DESC, s.position ASC
+    """)
     standings = cur.fetchall()
-    cur.execute('SELECT team_id, name FROM teams')
+
+    cur.execute("""
+        SELECT team_id, name
+        FROM teams
+        ORDER BY name ASC
+    """)
     teams = cur.fetchall()
+
+    cur.execute("""
+        SELECT league_id, name
+        FROM leagues
+        ORDER BY name ASC
+    """)
+    leagues = cur.fetchall()
+
+    cur.execute("""
+        SELECT season_id, year
+        FROM seasons
+        ORDER BY year DESC
+    """)
+    seasons = cur.fetchall()
+
     cur.close()
-    return render_template('manage_standings.html', standings=standings, teams=teams)
+
+    return render_template(
+        'manage_standings.html',
+        standings=standings,
+        teams=teams,
+        leagues=leagues,
+        seasons=seasons
+    )
 
 @admin_bp.route('/manage_users', methods=['GET', 'POST'])
 @admin_required
