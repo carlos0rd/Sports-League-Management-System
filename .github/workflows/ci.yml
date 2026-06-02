@@ -1,0 +1,53 @@
+name: Flask Sports League CI
+
+# El pipeline se activará con cualquier push o pull request en estas ramas
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches: [ "main", "develop" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Descargar el código del repositorio
+    - name: Checkout del código
+      uses: actions/checkout@v4
+
+    # 2. Configurar el entorno de Python 3.10
+    - name: Configurar Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    # 3. Instalar y configurar Poetry
+    - name: Instalar Poetry
+      run: |
+        curl -sSL https://install.python-poetry.org | python3 -
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    # 4. Instalar las dependencias exactas del proyecto
+    - name: Instalar dependencias con Poetry
+      run: |
+        poetry install --no-root
+
+    # 5. Instalar Ruff para calidad de código
+    - name: Instalar Ruff
+      run: |
+        poetry run pip install ruff
+
+    # 6. Verificar la calidad del código con Ruff (solo reporta, no falla por estilo)
+    - name: Validar sintaxis con Ruff
+      run: |
+        # Verifica la sintaxis basándose en el pyproject.toml sin hacer cambios automáticos
+        # Se añade --exit-zero para que los warnings de formato (como E501) no rompan el pipeline
+        poetry run ruff check . --exit-zero
+
+    # 7. Ejecutar validación de inicialización básica
+    - name: Verificación de compilación e inicialización
+      run: |
+        # Verifica que los módulos principales puedan ser compilados por Python sin SyntaxError
+        poetry run python -m py_compile main.py db.py admin_routes.py user_routes.py gis_routes.py sync_api.py
