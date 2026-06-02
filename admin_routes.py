@@ -2146,23 +2146,61 @@ def manage_users():
     if request.method == 'POST':
         try:
             user_id = request.form.get('user_id')
-            is_admin = request.form.get('is_admin') == 'true'
+            is_admin_value = request.form.get('is_admin')
+            is_admin = is_admin_value == 'true'
 
-            cur.execute('UPDATE users SET is_admin = %s WHERE user_id = %s', (is_admin, user_id))
+            if not user_id:
+                flash('No user selected', 'error')
+                return redirect(url_for('admin.manage_users'))
+
+            cur.execute("""
+                SELECT user_id, username, is_admin
+                FROM users
+                WHERE user_id = %s
+            """, (user_id,))
+            selected_user = cur.fetchone()
+
+            if not selected_user:
+                flash('Selected user does not exist', 'error')
+                return redirect(url_for('admin.manage_users'))
+
+            current_user_id = session.get('user_id')
+
+            if str(user_id) == str(current_user_id) and not is_admin:
+                flash('You cannot remove your own admin privileges.', 'warning')
+                return redirect(url_for('admin.manage_users'))
+
+            cur.execute("""
+                UPDATE users
+                SET is_admin = %s
+                WHERE user_id = %s
+            """, (is_admin, user_id))
+
             db.commit()
             flash('User privilege updated successfully', 'success')
+
         except Exception as e:
             db.rollback()
             flash('An error occurred: ' + str(e), 'error')
+
         finally:
             cur.close()
+
         return redirect(url_for('admin.manage_users'))
 
-    cur.execute('SELECT user_id, username, is_admin FROM users')
+    cur.execute("""
+        SELECT user_id, username, is_admin
+        FROM users
+        ORDER BY user_id ASC
+    """)
     users = cur.fetchall()
+
     cur.close()
 
-    return render_template('manage_users.html', users=users)
+    return render_template(
+        'manage_users.html',
+        users=users
+    )
 
 @admin_bp.route('/sync_api/matches', methods=['POST'])
 @admin_required
