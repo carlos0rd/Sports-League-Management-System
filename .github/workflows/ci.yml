@@ -3,7 +3,8 @@ name: Flask Sports League CI
 # El pipeline se activará con cualquier push o pull request en estas ramas
 on:
   push:
-    branches: [ "main", "develop" ]
+    branches:
+      - '**'
   pull_request:
     branches: [ "main", "develop" ]
 
