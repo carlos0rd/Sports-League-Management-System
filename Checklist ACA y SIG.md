@@ -23,8 +23,8 @@
 
 ### GitHub Actions (CI)
 
-- [ ] `1.8` Crear un workflow de GitHub Actions que se ejecute en cada push a ramas principales `[ACA]`
-- [ ] `1.9` Configurar el workflow para instalar dependencias y ejecutar validaciones básicas del proyecto `[ACA]`
+- [x] `1.8` Crear un workflow de GitHub Actions que se ejecute en cada push a ramas principales `[ACA]`
+- [x] `1.9` Configurar el workflow para instalar dependencias y ejecutar validaciones básicas del proyecto `[ACA]`
 - [ ] `1.10` Verificar que el pipeline corre correctamente en al menos una ejecución de prueba `[ACA]`
 
 ### Gestión con GitHub Issues / Projects

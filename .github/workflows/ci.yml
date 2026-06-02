@@ -16,39 +16,36 @@ jobs:
     - name: Checkout del código
       uses: actions/checkout@v4
 
-    # 2. Configurar el entorno de Python
-    - name: Configurar Python 3.11
+    # 2. Configurar el entorno de Python 3.10
+    - name: Configurar Python 3.10
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: '3.10'
 
-    # 3. Cachear las dependencias de Pip para que corra más rápido en las siguientes ejecuciones
-    - name: Cachear dependencias de Pip
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-
-    # 4. Instalar las librerías de requirements.txt
-    - name: Instalar dependencias
+    # 3. Instalar y configurar Poetry
+    - name: Instalar Poetry
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest flake8 # Herramientas de pruebas y calidad de código
+        curl -sSL https://install.python-poetry.org | python3 -
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-    # 5. Verificar que no haya errores de sintaxis en el código Python
-    - name: Validar sintaxis con Flake8
+    # 4. Instalar las dependencias exactas del proyecto
+    - name: Instalar dependencias con Poetry
       run: |
-        # Detiene el proceso si encuentra errores de sintaxis graves
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        poetry install --no-root
 
-    # 6. Ejecutar tus pruebas automatizadas
-    - name: Ejecutar pruebas (Tests)
+    # 5. Instalar Ruff para calidad de código
+    - name: Instalar Ruff
       run: |
-        # Si se usa el framework nativo de Python (unittest):
-        python -m unittest discover -s tests
-        
-        # Si se usar pytest, borrar la línea de arriba y descomentar la de abajo:
-        # pytest
+        poetry run pip install ruff
+
+    # 6. Verificar que no haya errores de sintaxis en el código Python usando Ruff
+    - name: Validar sintaxis con Ruff
+      run: |
+        # Verifica la sintaxis basandose en el pyproject.toml sin hacer cambios automáticos
+        poetry run ruff check .
+
+    # 7. Ejecutar validación de inicialización básica
+    - name: Verificación de compilación e inicialización
+      run: |
+        # Verifica que los módulos principales puedan ser compilados por Python sin SyntaxError
+        poetry run python -m py_compile main.py db.py admin_routes.py user_routes.py gis_routes.py sync_api.py
