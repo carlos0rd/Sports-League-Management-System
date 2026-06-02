@@ -591,6 +591,7 @@ def manage_teams():
                 founded_year = clean_int(request.form.get('founded_year'))
                 stadium_id = clean_value(request.form.get('stadium_id'))
                 league_id = clean_value(request.form.get('league_id'))
+                referee_id = clean_value(request.form.get('referee_id'))
                 coach_id = clean_value(request.form.get('coach_id'))
 
                 if not name:
@@ -1071,6 +1072,7 @@ def manage_matches():
                 team2_id = clean_value(request.form.get('team2_id'))
                 season_id = clean_value(request.form.get('season_id'))
                 league_id = clean_value(request.form.get('league_id'))
+                referee_id = clean_value(request.form.get('referee_id'))
 
                 if not date:
                     flash('Date is required', 'error')
@@ -1141,6 +1143,18 @@ def manage_matches():
                         league_id,
                         match_id
                     ))
+                    
+                    cur.execute("""
+                        DELETE FROM match_referees
+                        WHERE match_id = %s
+                    """, (match_id,))
+
+                    if referee_id:
+                        cur.execute("""
+                            INSERT INTO match_referees (match_id, referee_id)
+                            VALUES (%s, %s)
+                        """, (match_id, referee_id))
+    
                     flash('Match updated successfully', 'success')
                 else:
                     cur.execute("""
@@ -1148,6 +1162,7 @@ def manage_matches():
                             (utc_date, home_team_id, away_team_id, season_id, league_id, status)
                         VALUES
                             (%s, %s, %s, %s, %s, 'SCHEDULED')
+                        RETURNING match_id
                     """, (
                         date,
                         team1_id,
@@ -1155,6 +1170,16 @@ def manage_matches():
                         season_id,
                         league_id
                     ))
+
+                    new_match = cur.fetchone()
+                    new_match_id = new_match[0] if new_match else None
+
+                    if referee_id and new_match_id:
+                        cur.execute("""
+                            INSERT INTO match_referees (match_id, referee_id)
+                            VALUES (%s, %s)
+                        """, (new_match_id, referee_id))
+
                     flash('Match added successfully', 'success')
 
             db.commit()
@@ -1181,12 +1206,14 @@ def manage_matches():
             COALESCE(m.status, 'SCHEDULED') AS status,
             TO_CHAR(m.utc_date, 'YYYY-MM-DD') AS input_date,
             m.season_id,
-            m.league_id
+            m.league_id,
+            mr.referee_id
         FROM matches m
         JOIN teams t1 ON m.home_team_id = t1.team_id
         JOIN teams t2 ON m.away_team_id = t2.team_id
         JOIN seasons s ON m.season_id = s.season_id
         JOIN leagues l ON m.league_id = l.league_id
+        LEFT JOIN match_referees mr ON m.match_id = mr.match_id
         ORDER BY m.utc_date DESC, m.match_id DESC
     """)
     matches = cur.fetchall()
@@ -1211,6 +1238,13 @@ def manage_matches():
         ORDER BY name ASC
     """)
     leagues = cur.fetchall()
+    
+    cur.execute("""
+        SELECT referee_id, name
+        FROM referees
+        ORDER BY name ASC
+    """)
+    referees = cur.fetchall()
 
     cur.close()
 
@@ -1219,7 +1253,8 @@ def manage_matches():
         matches=matches,
         teams=teams,
         seasons=seasons,
-        leagues=leagues
+        leagues=leagues,
+        referees=referees
     )
 
 

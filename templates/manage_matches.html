@@ -61,6 +61,15 @@
     {% endfor %}
 </select>
                 </div>
+                <div class="form-group">
+    <label for="referee_id">Referee:</label>
+    <select class="form-control" id="referee_id" name="referee_id">
+        <option value="">No referee</option>
+        {% for referee in referees %}
+            <option value="{{ referee[0] }}">{{ referee[1] }}</option>
+        {% endfor %}
+    </select>
+</div>
                 <button type="submit" name="submit" class="btn btn-primary" id="submit-button">Add Match</button>
             </form>
                 </div>
@@ -111,6 +120,7 @@
     data-team2-id="{{ match[7] or '' }}"
     data-season-id="{{ match[10] or '' }}"
     data-league-id="{{ match[11] or '' }}">
+    data-referee-id="{{ match[12] or '' }}"
     <i class="fa fa-pencil-alt"></i>
 </button>
                         </td>
@@ -147,6 +157,7 @@
             const team2Id = this.getAttribute('data-team2-id');
             const seasonId = this.getAttribute('data-season-id');
             const leagueId = this.getAttribute('data-league-id');
+            const refereeId = this.getAttribute('data-referee-id');
 
             document.getElementById('match_id').value = id;
             document.getElementById('date').value = date || '';
@@ -154,6 +165,7 @@
             document.getElementById('team2_id').value = team2Id || '';
             document.getElementById('season_id').value = seasonId || '';
             document.getElementById('league_id').value = leagueId || '';
+            document.getElementById('referee_id').value = refereeId || '';
 
             document.getElementById('submit-button').innerText = 'Update Match';
             document.getElementById('form-title').innerText = 'Edit Match';
