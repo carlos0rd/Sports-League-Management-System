@@ -1467,71 +1467,197 @@ def manage_scores():
 
     if request.method == 'POST':
         try:
-            score_id = request.form.get('score_id')
-            match_id = request.form['match_id']
-            full_time_home = request.form['full_time_home']
-            full_time_away = request.form['full_time_away']
-            half_time_home = request.form['half_time_home']
-            half_time_away = request.form['half_time_away']
-            new_home = int(full_time_home) if full_time_home != '' else None
-            new_away = int(full_time_away) if full_time_away != '' else None
+            if 'delete' in request.form:
+                score_id = (
+                    request.form.get('deleteItemId')
+                    or request.form.get('deleteEntityId')
+                    or request.form.get('item_id')
+                    or request.form.get('score_id')
+                )
 
-            cur.execute(
-                """
-                SELECT m.status, s.full_time_home, s.full_time_away,
-                       m.home_team_id, m.away_team_id, m.league_id
-                FROM matches m
-                LEFT JOIN scores s ON m.match_id = s.match_id
-                WHERE m.match_id = %s
-                """,
-                (match_id,),
-            )
-            match_row = cur.fetchone()
+                if not score_id:
+                    flash('No score selected for deletion', 'error')
+                    return redirect(url_for('admin.manage_scores'))
 
-            if 'submit' in request.form:
+                cur.execute("DELETE FROM scores WHERE score_id = %s", (score_id,))
+                flash('Score deleted successfully', 'success')
+
+            else:
+                score_id = request.form.get('score_id')
+                match_id = clean_value(request.form.get('match_id'))
+                full_time_home = clean_int(request.form.get('full_time_home'))
+                full_time_away = clean_int(request.form.get('full_time_away'))
+                half_time_home = clean_int(request.form.get('half_time_home'))
+                half_time_away = clean_int(request.form.get('half_time_away'))
+
+                if not match_id:
+                    flash('Match is required', 'error')
+                    return redirect(url_for('admin.manage_scores'))
+
+                score_values = [
+                    full_time_home,
+                    full_time_away,
+                    half_time_home,
+                    half_time_away
+                ]
+
+                if any(value is None for value in score_values):
+                    flash('All score fields are required', 'error')
+                    return redirect(url_for('admin.manage_scores'))
+
+                if any(value < 0 for value in score_values):
+                    flash('Score values cannot be negative', 'warning')
+                    return redirect(url_for('admin.manage_scores'))
+
+                if half_time_home > full_time_home or half_time_away > full_time_away:
+                    flash('Half time score cannot be greater than full time score.', 'warning')
+                    return redirect(url_for('admin.manage_scores'))
+
+                cur.execute("""
+                    SELECT
+                        m.status,
+                        s.full_time_home,
+                        s.full_time_away,
+                        m.home_team_id,
+                        m.away_team_id,
+                        m.league_id
+                    FROM matches m
+                    LEFT JOIN scores s ON m.match_id = s.match_id
+                    WHERE m.match_id = %s
+                """, (match_id,))
+                match_row = cur.fetchone()
+
+                if not match_row:
+                    flash('Selected match does not exist', 'error')
+                    return redirect(url_for('admin.manage_scores'))
+
                 if score_id:
-                    cur.execute('UPDATE scores SET match_id = %s, full_time_home = %s, full_time_away = %s, half_time_home = %s, half_time_away = %s WHERE score_id = %s',
-                                (match_id, full_time_home, full_time_away, half_time_home, half_time_away, score_id))
+                    cur.execute("""
+                        SELECT score_id
+                        FROM scores
+                        WHERE match_id = %s
+                          AND score_id <> %s
+                    """, (match_id, score_id))
+                else:
+                    cur.execute("""
+                        SELECT score_id
+                        FROM scores
+                        WHERE match_id = %s
+                    """, (match_id,))
+
+                existing = cur.fetchone()
+
+                if existing:
+                    flash('This match already has a score.', 'warning')
+                    return redirect(url_for('admin.manage_scores'))
+
+                if score_id:
+                    cur.execute("""
+                        UPDATE scores
+                        SET match_id = %s,
+                            full_time_home = %s,
+                            full_time_away = %s,
+                            half_time_home = %s,
+                            half_time_away = %s
+                        WHERE score_id = %s
+                    """, (
+                        match_id,
+                        full_time_home,
+                        full_time_away,
+                        half_time_home,
+                        half_time_away,
+                        score_id
+                    ))
                     flash('Score updated successfully', 'success')
                 else:
-                    cur.execute('INSERT INTO scores (match_id, full_time_home, full_time_away, half_time_home, half_time_away) VALUES (%s, %s, %s, %s, %s)',
-                                (match_id, full_time_home, full_time_away, half_time_home, half_time_away))
+                    cur.execute("""
+                        INSERT INTO scores
+                            (match_id, full_time_home, full_time_away, half_time_home, half_time_away)
+                        VALUES
+                            (%s, %s, %s, %s, %s)
+                    """, (
+                        match_id,
+                        full_time_home,
+                        full_time_away,
+                        half_time_home,
+                        half_time_away
+                    ))
                     flash('Score added successfully', 'success')
 
-                if match_row:
-                    from notification_service import process_match_notification_events
+                from notification_service import process_match_notification_events
 
-                    process_match_notification_events(
-                        cur,
-                        int(match_id),
-                        match_row[3],
-                        match_row[4],
-                        match_row[5],
-                        match_row[0],
-                        match_row[0],
-                        match_row[1],
-                        match_row[2],
-                        new_home,
-                        new_away,
-                    )
-            elif 'delete' in request.form:
-                score_id = request.form['deleteEntityId']
-                cur.execute('DELETE FROM scores WHERE score_id = %s', (score_id,))
-                flash('Score deleted successfully', 'success')
+                process_match_notification_events(
+                    cur,
+                    int(match_id),
+                    match_row[3],
+                    match_row[4],
+                    match_row[5],
+                    match_row[0],
+                    match_row[0],
+                    match_row[1],
+                    match_row[2],
+                    full_time_home,
+                    full_time_away,
+                )
+
             db.commit()
+
         except Exception as e:
             db.rollback()
             flash('An error occurred: ' + str(e), 'error')
+
         finally:
             cur.close()
+
         return redirect(url_for('admin.manage_scores'))
 
-    cur.execute('SELECT s.score_id, m.utc_date, s.full_time_home, s.full_time_away, s.half_time_home, s.half_time_away FROM scores s JOIN matches m ON s.match_id = m.match_id')
+    cur.execute("""
+        SELECT
+            s.score_id,
+            CONCAT(
+                TO_CHAR(m.utc_date, 'YYYY-MM-DD'),
+                ' - ',
+                t1.name,
+                ' vs ',
+                t2.name
+            ) AS match_label,
+            s.full_time_home,
+            s.full_time_away,
+            s.half_time_home,
+            s.half_time_away,
+            s.match_id
+        FROM scores s
+        JOIN matches m ON s.match_id = m.match_id
+        JOIN teams t1 ON m.home_team_id = t1.team_id
+        JOIN teams t2 ON m.away_team_id = t2.team_id
+        ORDER BY m.utc_date DESC, s.score_id DESC
+    """)
     scores = cur.fetchall()
-    cur.execute('SELECT match_id, utc_date FROM matches')
+
+    cur.execute("""
+        SELECT
+            m.match_id,
+            CONCAT(
+                TO_CHAR(m.utc_date, 'YYYY-MM-DD'),
+                ' - ',
+                t1.name,
+                ' vs ',
+                t2.name
+            ) AS match_label
+        FROM matches m
+        JOIN teams t1 ON m.home_team_id = t1.team_id
+        JOIN teams t2 ON m.away_team_id = t2.team_id
+        ORDER BY m.utc_date DESC, m.match_id DESC
+    """)
     matches = cur.fetchall()
+
     cur.close()
-    return render_template('manage_scores.html', scores=scores, matches=matches)
+
+    return render_template(
+        'manage_scores.html',
+        scores=scores,
+        matches=matches
+    )
 
 
 
