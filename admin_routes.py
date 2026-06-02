@@ -1034,52 +1034,193 @@ def manage_matches():
 
     if request.method == 'POST':
         try:
-            match_id = request.form.get('match_id')
-            date = request.form['date']
-            team1_id = request.form['team1_id']
-            team2_id = request.form['team2_id']
-            season_id = request.form['season_id']
-            league_id = request.form['league_id']
+            if 'delete' in request.form:
+                match_id = (
+                    request.form.get('deleteItemId')
+                    or request.form.get('deleteEntityId')
+                    or request.form.get('item_id')
+                    or request.form.get('match_id')
+                )
 
-            if 'submit' in request.form:
+                if not match_id:
+                    flash('No match selected for deletion', 'error')
+                    return redirect(url_for('admin.manage_matches'))
+
+                cur.execute("SELECT COUNT(*) FROM scores WHERE match_id = %s", (match_id,))
+                scores_result = cur.fetchone()
+                scores_count = scores_result[0] if scores_result else 0
+
+                cur.execute("SELECT COUNT(*) FROM match_referees WHERE match_id = %s", (match_id,))
+                referees_result = cur.fetchone()
+                referees_count = referees_result[0] if referees_result else 0
+
+                if scores_count > 0 or referees_count > 0:
+                    flash(
+                        f'This match cannot be deleted because it is being used by '
+                        f'{scores_count} score record(s) and {referees_count} referee assignment(s).',
+                        'warning'
+                    )
+                else:
+                    cur.execute("DELETE FROM matches WHERE match_id = %s", (match_id,))
+                    flash('Match deleted successfully', 'success')
+
+            else:
+                match_id = request.form.get('match_id')
+                date = clean_value(request.form.get('date'))
+                team1_id = clean_value(request.form.get('team1_id'))
+                team2_id = clean_value(request.form.get('team2_id'))
+                season_id = clean_value(request.form.get('season_id'))
+                league_id = clean_value(request.form.get('league_id'))
+
+                if not date:
+                    flash('Date is required', 'error')
+                    return redirect(url_for('admin.manage_matches'))
+
+                if not team1_id:
+                    flash('Home team is required', 'error')
+                    return redirect(url_for('admin.manage_matches'))
+
+                if not team2_id:
+                    flash('Away team is required', 'error')
+                    return redirect(url_for('admin.manage_matches'))
+
+                if team1_id == team2_id:
+                    flash('Home team and away team cannot be the same.', 'warning')
+                    return redirect(url_for('admin.manage_matches'))
+
+                if not season_id:
+                    flash('Season is required', 'error')
+                    return redirect(url_for('admin.manage_matches'))
+
+                if not league_id:
+                    flash('League is required', 'error')
+                    return redirect(url_for('admin.manage_matches'))
+
                 if match_id:
-                    cur.execute('UPDATE matches SET utc_date = %s, home_team_id = %s, away_team_id = %s, season_id = %s, league_id = %s WHERE match_id = %s', 
-                                (date, team1_id, team2_id, season_id, league_id, match_id))
+                    cur.execute("""
+                        SELECT match_id
+                        FROM matches
+                        WHERE utc_date::date = %s::date
+                          AND home_team_id = %s
+                          AND away_team_id = %s
+                          AND season_id = %s
+                          AND league_id = %s
+                          AND match_id <> %s
+                    """, (date, team1_id, team2_id, season_id, league_id, match_id))
+                else:
+                    cur.execute("""
+                        SELECT match_id
+                        FROM matches
+                        WHERE utc_date::date = %s::date
+                          AND home_team_id = %s
+                          AND away_team_id = %s
+                          AND season_id = %s
+                          AND league_id = %s
+                    """, (date, team1_id, team2_id, season_id, league_id))
+
+                existing = cur.fetchone()
+
+                if existing:
+                    flash('This match already exists.', 'warning')
+                    return redirect(url_for('admin.manage_matches'))
+
+                if match_id:
+                    cur.execute("""
+                        UPDATE matches
+                        SET utc_date = %s,
+                            home_team_id = %s,
+                            away_team_id = %s,
+                            season_id = %s,
+                            league_id = %s
+                        WHERE match_id = %s
+                    """, (
+                        date,
+                        team1_id,
+                        team2_id,
+                        season_id,
+                        league_id,
+                        match_id
+                    ))
                     flash('Match updated successfully', 'success')
                 else:
-                    cur.execute('INSERT INTO matches (utc_date, home_team_id, away_team_id, season_id, league_id) VALUES (%s, %s, %s, %s, %s)', 
-                                (date, team1_id, team2_id, season_id, league_id))
+                    cur.execute("""
+                        INSERT INTO matches
+                            (utc_date, home_team_id, away_team_id, season_id, league_id, status)
+                        VALUES
+                            (%s, %s, %s, %s, %s, 'SCHEDULED')
+                    """, (
+                        date,
+                        team1_id,
+                        team2_id,
+                        season_id,
+                        league_id
+                    ))
                     flash('Match added successfully', 'success')
-            elif 'delete' in request.form:
-                match_id = request.form['deleteEntityId']
-                cur.execute('DELETE FROM matches WHERE match_id = %s', (match_id,))
-                flash('Match deleted successfully', 'success')
+
             db.commit()
+
         except Exception as e:
             db.rollback()
             flash('An error occurred: ' + str(e), 'error')
+
         finally:
             cur.close()
+
         return redirect(url_for('admin.manage_matches'))
 
-    cur.execute('''
-        SELECT m.match_id, m.utc_date, t1.name AS team1, t2.name AS team2, s.year AS season, l.name AS league,
-               m.home_team_id, m.away_team_id, m.status
+    cur.execute("""
+        SELECT
+            m.match_id,
+            TO_CHAR(m.utc_date, 'YYYY-MM-DD') AS display_date,
+            t1.name AS home_team_name,
+            t2.name AS away_team_name,
+            s.year AS season_year,
+            l.name AS league_name,
+            m.home_team_id,
+            m.away_team_id,
+            COALESCE(m.status, 'SCHEDULED') AS status,
+            TO_CHAR(m.utc_date, 'YYYY-MM-DD') AS input_date,
+            m.season_id,
+            m.league_id
         FROM matches m
         JOIN teams t1 ON m.home_team_id = t1.team_id
         JOIN teams t2 ON m.away_team_id = t2.team_id
         JOIN seasons s ON m.season_id = s.season_id
         JOIN leagues l ON m.league_id = l.league_id
-    ''')
+        ORDER BY m.utc_date DESC, m.match_id DESC
+    """)
     matches = cur.fetchall()
-    cur.execute('SELECT team_id, name FROM teams')
+
+    cur.execute("""
+        SELECT team_id, name
+        FROM teams
+        ORDER BY name ASC
+    """)
     teams = cur.fetchall()
-    cur.execute('SELECT season_id, year FROM seasons')
+
+    cur.execute("""
+        SELECT season_id, year
+        FROM seasons
+        ORDER BY year DESC
+    """)
     seasons = cur.fetchall()
-    cur.execute('SELECT league_id, name FROM leagues')
+
+    cur.execute("""
+        SELECT league_id, name
+        FROM leagues
+        ORDER BY name ASC
+    """)
     leagues = cur.fetchall()
+
     cur.close()
-    return render_template('manage_matches.html', matches=matches, teams=teams, seasons=seasons, leagues=leagues)
+
+    return render_template(
+        'manage_matches.html',
+        matches=matches,
+        teams=teams,
+        seasons=seasons,
+        leagues=leagues
+    )
 
 
 def normalize_flag_url(flag_value):
