@@ -1371,35 +1371,113 @@ def manage_referees():
 
     if request.method == 'POST':
         try:
-            referee_id = request.form.get('referee_id')
-            name = request.form['name']
-            nationality = request.form['nationality']
+            if 'delete' in request.form:
+                referee_id = (
+                    request.form.get('deleteItemId')
+                    or request.form.get('deleteEntityId')
+                    or request.form.get('item_id')
+                    or request.form.get('referee_id')
+                )
 
-            if 'submit' in request.form:
+                if not referee_id:
+                    flash('No referee selected for deletion', 'error')
+                    return redirect(url_for('admin.manage_referees'))
+
+                cur.execute(
+                    "SELECT COUNT(*) FROM match_referees WHERE referee_id = %s",
+                    (referee_id,)
+                )
+                matches_result = cur.fetchone()
+                matches_count = matches_result[0] if matches_result else 0
+
+                if matches_count > 0:
+                    flash(
+                        f'This referee cannot be deleted because it is assigned to {matches_count} match(es).',
+                        'warning'
+                    )
+                else:
+                    cur.execute(
+                        "DELETE FROM referees WHERE referee_id = %s",
+                        (referee_id,)
+                    )
+                    flash('Referee deleted successfully', 'success')
+
+            else:
+                referee_id = request.form.get('referee_id')
+                name = clean_value(request.form.get('name'))
+                nationality = clean_value(request.form.get('nationality'))
+
+                if not name:
+                    flash('Referee name is required', 'error')
+                    return redirect(url_for('admin.manage_referees'))
+
+                if not nationality:
+                    flash('Nationality is required', 'error')
+                    return redirect(url_for('admin.manage_referees'))
+
                 if referee_id:
-                    cur.execute('UPDATE referees SET name = %s, nationality = %s WHERE referee_id = %s', 
-                                (name, nationality, referee_id))
+                    cur.execute("""
+                        SELECT referee_id
+                        FROM referees
+                        WHERE LOWER(name) = LOWER(%s)
+                          AND LOWER(nationality) = LOWER(%s)
+                          AND referee_id <> %s
+                    """, (name, nationality, referee_id))
+                else:
+                    cur.execute("""
+                        SELECT referee_id
+                        FROM referees
+                        WHERE LOWER(name) = LOWER(%s)
+                          AND LOWER(nationality) = LOWER(%s)
+                    """, (name, nationality))
+
+                existing = cur.fetchone()
+
+                if existing:
+                    flash('This referee already exists.', 'warning')
+                    return redirect(url_for('admin.manage_referees'))
+
+                if referee_id:
+                    cur.execute("""
+                        UPDATE referees
+                        SET name = %s,
+                            nationality = %s
+                        WHERE referee_id = %s
+                    """, (name, nationality, referee_id))
+
                     flash('Referee updated successfully', 'success')
                 else:
-                    cur.execute('INSERT INTO referees (name, nationality) VALUES (%s, %s)', 
-                                (name, nationality))
+                    cur.execute("""
+                        INSERT INTO referees (name, nationality)
+                        VALUES (%s, %s)
+                    """, (name, nationality))
+
                     flash('Referee added successfully', 'success')
-            elif 'delete' in request.form:
-                referee_id = request.form['deleteEntityId']
-                cur.execute('DELETE FROM referees WHERE referee_id = %s', (referee_id,))
-                flash('Referee deleted successfully', 'success')
+
             db.commit()
+
         except Exception as e:
             db.rollback()
             flash('An error occurred: ' + str(e), 'error')
+
         finally:
             cur.close()
+
         return redirect(url_for('admin.manage_referees'))
 
-    cur.execute('SELECT referee_id, name, nationality FROM referees')
+    cur.execute("""
+        SELECT referee_id, name, nationality
+        FROM referees
+        ORDER BY referee_id
+    """)
     referees = cur.fetchall()
+
     cur.close()
-    return render_template('manage_referees.html', referees=referees)
+
+    return render_template(
+        'manage_referees.html',
+        referees=referees
+    )
 
 
 @admin_bp.route('/manage_scorers', methods=['GET', 'POST'])
