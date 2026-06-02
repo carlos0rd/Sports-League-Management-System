@@ -21,38 +21,41 @@
                 <div class="form-group">
                     <label for="player_id">Player:</label>
                     <select class="form-control" id="player_id" name="player_id" required>
-                        {% for player in players %}
-                        <option value="{{ player[0] }}">{{ player[1] }}</option>
-                        {% endfor %}
-                    </select>
+    <option value="">Select player</option>
+    {% for player in players %}
+        <option value="{{ player[0] }}">{{ player[1] }}</option>
+    {% endfor %}
+</select>
                 </div>
                 <div class="form-group">
                     <label for="season_id">Season:</label>
                     <select class="form-control" id="season_id" name="season_id" required>
-                        {% for season in seasons %}
-                        <option value="{{ season[0] }}">{{ season[1] }}</option>
-                        {% endfor %}
-                    </select>
+    <option value="">Select season</option>
+    {% for season in seasons %}
+        <option value="{{ season[0] }}">{{ season[1] }}</option>
+    {% endfor %}
+</select>
                 </div>
                 <div class="form-group">
                     <label for="league_id">League:</label>
                     <select class="form-control" id="league_id" name="league_id" required>
-                        {% for league in leagues %}
-                        <option value="{{ league[0] }}">{{ league[1] }}</option>
-                        {% endfor %}
-                    </select>
+    <option value="">Select league</option>
+    {% for league in leagues %}
+        <option value="{{ league[0] }}">{{ league[1] }}</option>
+    {% endfor %}
+</select>
                 </div>
                 <div class="form-group">
                     <label for="goals">Goals:</label>
-                    <input type="number" class="form-control" id="goals" name="goals">
+                    <input type="number" class="form-control" id="goals" name="goals" min="0" value="0" required>
                 </div>
                 <div class="form-group">
                     <label for="assists">Assists:</label>
-                    <input type="number" class="form-control" id="assists" name="assists">
+                    <input type="number" class="form-control" id="assists" name="assists" min="0" value="0" required>
                 </div>
                 <div class="form-group">
                     <label for="penalties">Penalties:</label>
-                    <input type="number" class="form-control" id="penalties" name="penalties">
+                    <input type="number" class="form-control" id="penalties" name="penalties" min="0" value="0" required>
                 </div>
                 <button type="submit" name="submit" class="btn btn-primary" id="submit-button">Add Scorer</button>
             </form>
@@ -84,14 +87,32 @@
                         <td>{{ scorer[5] }}</td>
                         <td>{{ scorer[6] }}</td>
                         <td>
-                            <button class="btn btn-success btn-sm" onclick="editScorer('{{ scorer[0] }}', '{{ scorer[1] }}', '{{ scorer[2] }}', '{{ scorer[3] }}', '{{ scorer[4] }}', '{{ scorer[5] }}', '{{ scorer[6] }}')">
-                                <i class="fa fa-pencil-alt"></i>
-                            </button>
+                            <button
+    type="button"
+    class="btn btn-success btn-sm edit-scorer-btn"
+    data-id="{{ scorer[0] }}"
+    data-player-id="{{ scorer[7] or '' }}"
+    data-season-id="{{ scorer[8] or '' }}"
+    data-league-id="{{ scorer[9] or '' }}"
+    data-goals="{{ scorer[4] or 0 }}"
+    data-assists="{{ scorer[5] or 0 }}"
+    data-penalties="{{ scorer[6] or 0 }}">
+    <i class="fa fa-pencil-alt"></i>
+</button>
                         </td>
                         <td>
-                            <button class="btn btn-danger btn-sm" data-toggle="modal" data-target="#deleteModal" data-id="{{ scorer[0] }}" data-action="{{ url_for('admin.manage_scorers') }}">
-                                <i class="fa fa-minus"></i>
-                            </button>
+                            <form
+    action="{{ url_for('admin.manage_scorers') }}"
+    method="POST"
+    style="display:inline;"
+    onsubmit="return confirm('Are you sure you want to delete this scorer?');">
+
+    <input type="hidden" name="deleteItemId" value="{{ scorer[0] }}">
+
+    <button type="submit" name="delete" class="btn btn-danger btn-sm">
+        <i class="fa fa-minus"></i>
+    </button>
+</form>
                         </td>
                     </tr>
                     {% endfor %}
@@ -101,49 +122,28 @@
     </div>
 </div>
 
-<!-- Delete Modal -->
-<div class="modal fade" id="deleteModal" tabindex="-1" role="dialog" aria-labelledby="deleteModalLabel" aria-hidden="true">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <form id="deleteForm" method="POST" action="">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="deleteModalLabel">Confirm Delete</h5>
-                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">&times;</span>
-                    </button>
-                </div>
-                <div class="modal-body">
-                    Are you sure you want to delete this item?
-                    <input type="hidden" id="deleteItemId" name="deleteEntityId">
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-                    <button type="submit" name="delete" class="btn btn-danger">Delete</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
 <script>
-    function editScorer(id, player_id, season_id, league_id, goals, assists, penalties) {
-        document.getElementById('scorer_id').value = id;
-        document.getElementById('player_id').value = player_id;
-        document.getElementById('season_id').value = season_id;
-        document.getElementById('league_id').value = league_id;
-        document.getElementById('goals').value = goals;
-        document.getElementById('assists').value = assists;
-        document.getElementById('penalties').value = penalties;
-        document.getElementById('submit-button').innerText = 'Update Scorer';
-        document.getElementById('form-title').innerText = 'Edit Scorer';
-    }
+    document.querySelectorAll('.edit-scorer-btn').forEach(function(button) {
+        button.addEventListener('click', function() {
+            const id = this.getAttribute('data-id');
+            const playerId = this.getAttribute('data-player-id');
+            const seasonId = this.getAttribute('data-season-id');
+            const leagueId = this.getAttribute('data-league-id');
+            const goals = this.getAttribute('data-goals');
+            const assists = this.getAttribute('data-assists');
+            const penalties = this.getAttribute('data-penalties');
 
-    $('#deleteModal').on('show.bs.modal', function (event) {
-        var button = $(event.relatedTarget);
-        var id = button.data('id');
-        var action = button.data('action');
-        document.getElementById('deleteItemId').value = id;
-        document.getElementById('deleteForm').action = action;
+            document.getElementById('scorer_id').value = id;
+            document.getElementById('player_id').value = playerId || '';
+            document.getElementById('season_id').value = seasonId || '';
+            document.getElementById('league_id').value = leagueId || '';
+            document.getElementById('goals').value = goals || 0;
+            document.getElementById('assists').value = assists || 0;
+            document.getElementById('penalties').value = penalties || 0;
+
+            document.getElementById('submit-button').innerText = 'Update Scorer';
+            document.getElementById('form-title').innerText = 'Edit Scorer';
+        });
     });
 </script>
 {% endblock %}

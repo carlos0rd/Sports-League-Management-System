@@ -1402,7 +1402,6 @@ def manage_referees():
     return render_template('manage_referees.html', referees=referees)
 
 
-
 @admin_bp.route('/manage_scorers', methods=['GET', 'POST'])
 @admin_required
 def manage_scorers():
@@ -1411,51 +1410,173 @@ def manage_scorers():
 
     if request.method == 'POST':
         try:
-            scorer_id = request.form.get('scorer_id')
-            player_id = request.form['player_id']
-            season_id = request.form['season_id']
-            league_id = request.form['league_id']
-            goals = request.form['goals']
-            assists = request.form['assists']
-            penalties = request.form['penalties']
+            if 'delete' in request.form:
+                scorer_id = (
+                    request.form.get('deleteItemId')
+                    or request.form.get('deleteEntityId')
+                    or request.form.get('item_id')
+                    or request.form.get('scorer_id')
+                )
 
-            if 'submit' in request.form:
+                if not scorer_id:
+                    flash('No scorer selected for deletion', 'error')
+                    return redirect(url_for('admin.manage_scorers'))
+
+                cur.execute("DELETE FROM scorers WHERE scorer_id = %s", (scorer_id,))
+                flash('Scorer deleted successfully', 'success')
+
+            else:
+                scorer_id = request.form.get('scorer_id')
+                player_id = clean_value(request.form.get('player_id'))
+                season_id = clean_value(request.form.get('season_id'))
+                league_id = clean_value(request.form.get('league_id'))
+                goals = clean_int(request.form.get('goals'))
+                assists = clean_int(request.form.get('assists'))
+                penalties = clean_int(request.form.get('penalties'))
+
+                if not player_id:
+                    flash('Player is required', 'error')
+                    return redirect(url_for('admin.manage_scorers'))
+
+                if not season_id:
+                    flash('Season is required', 'error')
+                    return redirect(url_for('admin.manage_scorers'))
+
+                if not league_id:
+                    flash('League is required', 'error')
+                    return redirect(url_for('admin.manage_scorers'))
+
+                scorer_values = [goals, assists, penalties]
+
+                if any(value is None for value in scorer_values):
+                    flash('Goals, assists and penalties are required', 'error')
+                    return redirect(url_for('admin.manage_scorers'))
+
+                if any(value is not None and value < 0 for value in scorer_values):
+                    flash('Goals, assists and penalties cannot be negative', 'warning')
+                    return redirect(url_for('admin.manage_scorers'))
+
                 if scorer_id:
-                    cur.execute('UPDATE scorers SET player_id = %s, season_id = %s, league_id = %s, goals = %s, assists = %s, penalties = %s WHERE scorer_id = %s',
-                                (player_id, season_id, league_id, goals, assists, penalties, scorer_id))
+                    cur.execute("""
+                        SELECT scorer_id
+                        FROM scorers
+                        WHERE player_id = %s
+                          AND season_id = %s
+                          AND league_id = %s
+                          AND scorer_id <> %s
+                    """, (player_id, season_id, league_id, scorer_id))
+                else:
+                    cur.execute("""
+                        SELECT scorer_id
+                        FROM scorers
+                        WHERE player_id = %s
+                          AND season_id = %s
+                          AND league_id = %s
+                    """, (player_id, season_id, league_id))
+
+                existing = cur.fetchone()
+
+                if existing:
+                    flash('This scorer already exists for the selected player, season and league.', 'warning')
+                    return redirect(url_for('admin.manage_scorers'))
+
+                if scorer_id:
+                    cur.execute("""
+                        UPDATE scorers
+                        SET player_id = %s,
+                            season_id = %s,
+                            league_id = %s,
+                            goals = %s,
+                            assists = %s,
+                            penalties = %s
+                        WHERE scorer_id = %s
+                    """, (
+                        player_id,
+                        season_id,
+                        league_id,
+                        goals,
+                        assists,
+                        penalties,
+                        scorer_id
+                    ))
                     flash('Scorer updated successfully', 'success')
                 else:
-                    cur.execute('INSERT INTO scorers (player_id, season_id, league_id, goals, assists, penalties) VALUES (%s, %s, %s, %s, %s, %s)',
-                                (player_id, season_id, league_id, goals, assists, penalties))
+                    cur.execute("""
+                        INSERT INTO scorers
+                            (player_id, season_id, league_id, goals, assists, penalties)
+                        VALUES
+                            (%s, %s, %s, %s, %s, %s)
+                    """, (
+                        player_id,
+                        season_id,
+                        league_id,
+                        goals,
+                        assists,
+                        penalties
+                    ))
                     flash('Scorer added successfully', 'success')
-            elif 'delete' in request.form:
-                scorer_id = request.form['deleteEntityId']
-                cur.execute('DELETE FROM scorers WHERE scorer_id = %s', (scorer_id,))
-                flash('Scorer deleted successfully', 'success')
+
             db.commit()
+
         except Exception as e:
             db.rollback()
             flash('An error occurred: ' + str(e), 'error')
+
         finally:
             cur.close()
+
         return redirect(url_for('admin.manage_scorers'))
 
-    cur.execute('''
-        SELECT s.scorer_id, p.name, se.year, l.name, s.goals, s.assists, s.penalties 
-        FROM scorers s 
-        JOIN players p ON s.player_id = p.player_id 
-        JOIN seasons se ON s.season_id = se.season_id 
-        JOIN leagues l ON s.league_id = l.league_id
-    ''')
+    cur.execute("""
+        SELECT
+            sc.scorer_id,
+            p.name AS player_name,
+            se.year AS season_year,
+            l.name AS league_name,
+            sc.goals,
+            sc.assists,
+            sc.penalties,
+            sc.player_id,
+            sc.season_id,
+            sc.league_id
+        FROM scorers sc
+        JOIN players p ON sc.player_id = p.player_id
+        JOIN seasons se ON sc.season_id = se.season_id
+        JOIN leagues l ON sc.league_id = l.league_id
+        ORDER BY sc.goals DESC, sc.scorer_id DESC
+    """)
     scorers = cur.fetchall()
-    cur.execute('SELECT player_id, name FROM players')
+
+    cur.execute("""
+        SELECT player_id, name
+        FROM players
+        ORDER BY name ASC
+    """)
     players = cur.fetchall()
-    cur.execute('SELECT season_id, year FROM seasons')
+
+    cur.execute("""
+        SELECT season_id, year
+        FROM seasons
+        ORDER BY year DESC
+    """)
     seasons = cur.fetchall()
-    cur.execute('SELECT league_id, name FROM leagues')
+
+    cur.execute("""
+        SELECT league_id, name
+        FROM leagues
+        ORDER BY name ASC
+    """)
     leagues = cur.fetchall()
+
     cur.close()
-    return render_template('manage_scorers.html', scorers=scorers, players=players, seasons=seasons, leagues=leagues)
+
+    return render_template(
+        'manage_scorers.html',
+        scorers=scorers,
+        players=players,
+        seasons=seasons,
+        leagues=leagues
+    )
 
 
 
@@ -1505,13 +1626,19 @@ def manage_scores():
                     flash('All score fields are required', 'error')
                     return redirect(url_for('admin.manage_scores'))
 
-                if any(value < 0 for value in score_values):
+                if any(value is not None and value < 0 for value in score_values):
                     flash('Score values cannot be negative', 'warning')
                     return redirect(url_for('admin.manage_scores'))
 
-                if half_time_home > full_time_home or half_time_away > full_time_away:
-                    flash('Half time score cannot be greater than full time score.', 'warning')
-                    return redirect(url_for('admin.manage_scores'))
+                if (
+                    half_time_home is not None
+                    and full_time_home is not None
+                    and half_time_away is not None
+                    and full_time_away is not None
+                ):
+                    if half_time_home > full_time_home or half_time_away > full_time_away:
+                        flash('Half time score cannot be greater than full time score.', 'warning')
+                        return redirect(url_for('admin.manage_scores'))
 
                 cur.execute("""
                     SELECT
