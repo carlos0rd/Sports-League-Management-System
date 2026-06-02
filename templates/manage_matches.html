@@ -22,9 +22,9 @@
             <form action="{{ url_for('admin.manage_matches') }}" method="POST">
                 <input type="hidden" id="match_id" name="match_id">
                 <div class="form-group">
-                    <label for="date">Date:</label>
-                    <input type="date" class="form-control" id="date" name="date" required>
-                </div>
+    <label for="date">Date and Time:</label>
+    <input type="datetime-local" class="form-control" id="date" name="date" required>
+</div>
                 <div class="form-group">
                     <label for="team1_id">Team 1:</label>
                     <select class="form-control" id="team1_id" name="team1_id" required>
@@ -68,6 +68,18 @@
         {% for referee in referees %}
             <option value="{{ referee[0] }}">{{ referee[1] }}</option>
         {% endfor %}
+    </select>
+</div>
+<div class="form-group">
+    <label for="status">Status:</label>
+    <select class="form-control" id="status" name="status" required>
+        <option value="SCHEDULED">Scheduled</option>
+        <option value="TIMED">Timed</option>
+        <option value="IN_PLAY">In Play</option>
+        <option value="PAUSED">Paused</option>
+        <option value="FINISHED">Finished</option>
+        <option value="POSTPONED">Postponed</option>
+        <option value="CANCELLED">Cancelled</option>
     </select>
 </div>
                 <button type="submit" name="submit" class="btn btn-primary" id="submit-button">Add Match</button>
@@ -119,8 +131,9 @@
     data-team1-id="{{ match[6] or '' }}"
     data-team2-id="{{ match[7] or '' }}"
     data-season-id="{{ match[10] or '' }}"
-    data-league-id="{{ match[11] or '' }}">
+    data-league-id="{{ match[11] or '' }}"
     data-referee-id="{{ match[12] or '' }}"
+    data-status="{{ match[8] or 'SCHEDULED' }}">
     <i class="fa fa-pencil-alt"></i>
 </button>
                         </td>
@@ -158,6 +171,7 @@
             const seasonId = this.getAttribute('data-season-id');
             const leagueId = this.getAttribute('data-league-id');
             const refereeId = this.getAttribute('data-referee-id');
+            const status = this.getAttribute('data-status');
 
             document.getElementById('match_id').value = id;
             document.getElementById('date').value = date || '';
@@ -166,9 +180,15 @@
             document.getElementById('season_id').value = seasonId || '';
             document.getElementById('league_id').value = leagueId || '';
             document.getElementById('referee_id').value = refereeId || '';
+            document.getElementById('status').value = status || 'SCHEDULED';
 
             document.getElementById('submit-button').innerText = 'Update Match';
             document.getElementById('form-title').innerText = 'Edit Match';
+
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
         });
     });
 </script>

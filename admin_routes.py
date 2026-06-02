@@ -592,6 +592,7 @@ def manage_teams():
                 stadium_id = clean_value(request.form.get('stadium_id'))
                 league_id = clean_value(request.form.get('league_id'))
                 referee_id = clean_value(request.form.get('referee_id'))
+                status = clean_value(request.form.get('status')) or 'SCHEDULED'
                 coach_id = clean_value(request.form.get('coach_id'))
 
                 if not name:
@@ -1035,6 +1036,11 @@ def manage_matches():
 
     if request.method == 'POST':
         try:
+            from notification_service import (
+                notify_new_match,
+                notify_match_rescheduled,
+                notify_match_status_change
+            )
             if 'delete' in request.form:
                 match_id = (
                     request.form.get('deleteItemId')
@@ -1073,6 +1079,7 @@ def manage_matches():
                 season_id = clean_value(request.form.get('season_id'))
                 league_id = clean_value(request.form.get('league_id'))
                 referee_id = clean_value(request.form.get('referee_id'))
+                status = clean_value(request.form.get('status')) or 'SCHEDULED'
 
                 if not date:
                     flash('Date is required', 'error')
@@ -1128,12 +1135,26 @@ def manage_matches():
 
                 if match_id:
                     cur.execute("""
+                        SELECT utc_date, status, home_team_id, away_team_id, league_id
+                        FROM matches
+                        WHERE match_id = %s
+                    """, (match_id,))
+
+                    old_match = cur.fetchone()
+
+                    old_date = old_match[0] if old_match else None
+                    old_status = old_match[1] if old_match else None
+                    old_home_team_id = old_match[2] if old_match else team1_id
+                    old_away_team_id = old_match[3] if old_match else team2_id
+                    old_league_id = old_match[4] if old_match else league_id
+                    cur.execute("""
                         UPDATE matches
                         SET utc_date = %s,
                             home_team_id = %s,
                             away_team_id = %s,
                             season_id = %s,
-                            league_id = %s
+                            league_id = %s,
+                            status = %s
                         WHERE match_id = %s
                     """, (
                         date,
@@ -1141,6 +1162,7 @@ def manage_matches():
                         team2_id,
                         season_id,
                         league_id,
+                        status,
                         match_id
                     ))
                     
@@ -1154,6 +1176,26 @@ def manage_matches():
                             INSERT INTO match_referees (match_id, referee_id)
                             VALUES (%s, %s)
                         """, (match_id, referee_id))
+                    
+                    notify_match_rescheduled(
+                        cur,
+                        int(match_id),
+                        int(team1_id),
+                        int(team2_id),
+                        int(league_id) if league_id else None,
+                        old_date,
+                        date
+                    )
+
+                    notify_match_status_change(
+                        cur,
+                        int(match_id),
+                        int(team1_id),
+                        int(team2_id),
+                        int(league_id) if league_id else None,
+                        old_status,
+                        status
+                    )
     
                     flash('Match updated successfully', 'success')
                 else:
@@ -1161,14 +1203,15 @@ def manage_matches():
                         INSERT INTO matches
                             (utc_date, home_team_id, away_team_id, season_id, league_id, status)
                         VALUES
-                            (%s, %s, %s, %s, %s, 'SCHEDULED')
+                            (%s, %s, %s, %s, %s, %s)
                         RETURNING match_id
                     """, (
                         date,
                         team1_id,
                         team2_id,
                         season_id,
-                        league_id
+                        league_id,
+                        status
                     ))
 
                     new_match = cur.fetchone()
@@ -1179,6 +1222,16 @@ def manage_matches():
                             INSERT INTO match_referees (match_id, referee_id)
                             VALUES (%s, %s)
                         """, (new_match_id, referee_id))
+                    
+                    if new_match_id:
+                        notify_new_match(
+                            cur,
+                            int(new_match_id),
+                            int(team1_id),
+                            int(team2_id),
+                            int(league_id) if league_id else None,
+                            date
+                        )
 
                     flash('Match added successfully', 'success')
 
@@ -1196,7 +1249,7 @@ def manage_matches():
     cur.execute("""
         SELECT
             m.match_id,
-            TO_CHAR(m.utc_date, 'YYYY-MM-DD') AS display_date,
+            TO_CHAR(m.utc_date, 'YYYY-MM-DD HH24:MI') AS display_date,
             t1.name AS home_team_name,
             t2.name AS away_team_name,
             s.year AS season_year,
@@ -1204,7 +1257,7 @@ def manage_matches():
             m.home_team_id,
             m.away_team_id,
             COALESCE(m.status, 'SCHEDULED') AS status,
-            TO_CHAR(m.utc_date, 'YYYY-MM-DD') AS input_date,
+            TO_CHAR(m.utc_date, 'YYYY-MM-DD"T"HH24:MI') AS input_date,
             m.season_id,
             m.league_id,
             mr.referee_id
@@ -1909,6 +1962,7 @@ def manage_standings():
 
     if request.method == 'POST':
         try:
+            from notification_service import notify_standings_change
             if 'delete' in request.form:
                 standing_id = (
                     request.form.get('deleteItemId')
@@ -2046,6 +2100,16 @@ def manage_standings():
 
                 if standing_id:
                     cur.execute("""
+                        SELECT team_id, position
+                        FROM standings
+                        WHERE standing_id = %s
+                    """, (standing_id,))
+
+                    old_standing = cur.fetchone()
+
+                    old_team_id = old_standing[0] if old_standing else team_id
+                    old_position = old_standing[1] if old_standing else None
+                    cur.execute("""
                         UPDATE standings
                         SET league_id = %s,
                             season_id = %s,
@@ -2077,6 +2141,12 @@ def manage_standings():
                         form,
                         standing_id
                     ))
+                    notify_standings_change(
+                        cur,
+                        int(old_team_id),
+                        int(old_position) if old_position is not None else None,
+                        int(position) if position is not None else None
+                    )
                     flash('Standing updated successfully', 'success')
                 else:
                     cur.execute("""
