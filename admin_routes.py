@@ -591,6 +591,8 @@ def manage_teams():
                 founded_year = clean_int(request.form.get('founded_year'))
                 stadium_id = clean_value(request.form.get('stadium_id'))
                 league_id = clean_value(request.form.get('league_id'))
+                referee_id = clean_value(request.form.get('referee_id'))
+                status = clean_value(request.form.get('status')) or 'SCHEDULED'
                 coach_id = clean_value(request.form.get('coach_id'))
 
                 if not name:
@@ -1034,52 +1036,279 @@ def manage_matches():
 
     if request.method == 'POST':
         try:
-            match_id = request.form.get('match_id')
-            date = request.form['date']
-            team1_id = request.form['team1_id']
-            team2_id = request.form['team2_id']
-            season_id = request.form['season_id']
-            league_id = request.form['league_id']
+            from notification_service import (
+                notify_new_match,
+                notify_match_rescheduled,
+                notify_match_status_change
+            )
+            if 'delete' in request.form:
+                match_id = (
+                    request.form.get('deleteItemId')
+                    or request.form.get('deleteEntityId')
+                    or request.form.get('item_id')
+                    or request.form.get('match_id')
+                )
 
-            if 'submit' in request.form:
+                if not match_id:
+                    flash('No match selected for deletion', 'error')
+                    return redirect(url_for('admin.manage_matches'))
+
+                cur.execute("SELECT COUNT(*) FROM scores WHERE match_id = %s", (match_id,))
+                scores_result = cur.fetchone()
+                scores_count = scores_result[0] if scores_result else 0
+
+                cur.execute("SELECT COUNT(*) FROM match_referees WHERE match_id = %s", (match_id,))
+                referees_result = cur.fetchone()
+                referees_count = referees_result[0] if referees_result else 0
+
+                if scores_count > 0 or referees_count > 0:
+                    flash(
+                        f'This match cannot be deleted because it is being used by '
+                        f'{scores_count} score record(s) and {referees_count} referee assignment(s).',
+                        'warning'
+                    )
+                else:
+                    cur.execute("DELETE FROM matches WHERE match_id = %s", (match_id,))
+                    flash('Match deleted successfully', 'success')
+
+            else:
+                match_id = request.form.get('match_id')
+                date = clean_value(request.form.get('date'))
+                team1_id = clean_value(request.form.get('team1_id'))
+                team2_id = clean_value(request.form.get('team2_id'))
+                season_id = clean_value(request.form.get('season_id'))
+                league_id = clean_value(request.form.get('league_id'))
+                referee_id = clean_value(request.form.get('referee_id'))
+                status = clean_value(request.form.get('status')) or 'SCHEDULED'
+
+                if not date:
+                    flash('Date is required', 'error')
+                    return redirect(url_for('admin.manage_matches'))
+
+                if not team1_id:
+                    flash('Home team is required', 'error')
+                    return redirect(url_for('admin.manage_matches'))
+
+                if not team2_id:
+                    flash('Away team is required', 'error')
+                    return redirect(url_for('admin.manage_matches'))
+
+                if team1_id == team2_id:
+                    flash('Home team and away team cannot be the same.', 'warning')
+                    return redirect(url_for('admin.manage_matches'))
+
+                if not season_id:
+                    flash('Season is required', 'error')
+                    return redirect(url_for('admin.manage_matches'))
+
+                if not league_id:
+                    flash('League is required', 'error')
+                    return redirect(url_for('admin.manage_matches'))
+
                 if match_id:
-                    cur.execute('UPDATE matches SET utc_date = %s, home_team_id = %s, away_team_id = %s, season_id = %s, league_id = %s WHERE match_id = %s', 
-                                (date, team1_id, team2_id, season_id, league_id, match_id))
+                    cur.execute("""
+                        SELECT match_id
+                        FROM matches
+                        WHERE utc_date::date = %s::date
+                          AND home_team_id = %s
+                          AND away_team_id = %s
+                          AND season_id = %s
+                          AND league_id = %s
+                          AND match_id <> %s
+                    """, (date, team1_id, team2_id, season_id, league_id, match_id))
+                else:
+                    cur.execute("""
+                        SELECT match_id
+                        FROM matches
+                        WHERE utc_date::date = %s::date
+                          AND home_team_id = %s
+                          AND away_team_id = %s
+                          AND season_id = %s
+                          AND league_id = %s
+                    """, (date, team1_id, team2_id, season_id, league_id))
+
+                existing = cur.fetchone()
+
+                if existing:
+                    flash('This match already exists.', 'warning')
+                    return redirect(url_for('admin.manage_matches'))
+
+                if match_id:
+                    cur.execute("""
+                        SELECT utc_date, status, home_team_id, away_team_id, league_id
+                        FROM matches
+                        WHERE match_id = %s
+                    """, (match_id,))
+
+                    old_match = cur.fetchone()
+
+                    old_date = old_match[0] if old_match else None
+                    old_status = old_match[1] if old_match else None
+                    old_home_team_id = old_match[2] if old_match else team1_id
+                    old_away_team_id = old_match[3] if old_match else team2_id
+                    old_league_id = old_match[4] if old_match else league_id
+                    cur.execute("""
+                        UPDATE matches
+                        SET utc_date = %s,
+                            home_team_id = %s,
+                            away_team_id = %s,
+                            season_id = %s,
+                            league_id = %s,
+                            status = %s
+                        WHERE match_id = %s
+                    """, (
+                        date,
+                        team1_id,
+                        team2_id,
+                        season_id,
+                        league_id,
+                        status,
+                        match_id
+                    ))
+                    
+                    cur.execute("""
+                        DELETE FROM match_referees
+                        WHERE match_id = %s
+                    """, (match_id,))
+
+                    if referee_id:
+                        cur.execute("""
+                            INSERT INTO match_referees (match_id, referee_id)
+                            VALUES (%s, %s)
+                        """, (match_id, referee_id))
+                    
+                    notify_match_rescheduled(
+                        cur,
+                        int(match_id),
+                        int(team1_id),
+                        int(team2_id),
+                        int(league_id) if league_id else None,
+                        old_date,
+                        date
+                    )
+
+                    notify_match_status_change(
+                        cur,
+                        int(match_id),
+                        int(team1_id),
+                        int(team2_id),
+                        int(league_id) if league_id else None,
+                        old_status,
+                        status
+                    )
+    
                     flash('Match updated successfully', 'success')
                 else:
-                    cur.execute('INSERT INTO matches (utc_date, home_team_id, away_team_id, season_id, league_id) VALUES (%s, %s, %s, %s, %s)', 
-                                (date, team1_id, team2_id, season_id, league_id))
+                    cur.execute("""
+                        INSERT INTO matches
+                            (utc_date, home_team_id, away_team_id, season_id, league_id, status)
+                        VALUES
+                            (%s, %s, %s, %s, %s, %s)
+                        RETURNING match_id
+                    """, (
+                        date,
+                        team1_id,
+                        team2_id,
+                        season_id,
+                        league_id,
+                        status
+                    ))
+
+                    new_match = cur.fetchone()
+                    new_match_id = new_match[0] if new_match else None
+
+                    if referee_id and new_match_id:
+                        cur.execute("""
+                            INSERT INTO match_referees (match_id, referee_id)
+                            VALUES (%s, %s)
+                        """, (new_match_id, referee_id))
+                    
+                    if new_match_id:
+                        notify_new_match(
+                            cur,
+                            int(new_match_id),
+                            int(team1_id),
+                            int(team2_id),
+                            int(league_id) if league_id else None,
+                            date
+                        )
+
                     flash('Match added successfully', 'success')
-            elif 'delete' in request.form:
-                match_id = request.form['deleteEntityId']
-                cur.execute('DELETE FROM matches WHERE match_id = %s', (match_id,))
-                flash('Match deleted successfully', 'success')
+
             db.commit()
+
         except Exception as e:
             db.rollback()
             flash('An error occurred: ' + str(e), 'error')
+
         finally:
             cur.close()
+
         return redirect(url_for('admin.manage_matches'))
 
-    cur.execute('''
-        SELECT m.match_id, m.utc_date, t1.name AS team1, t2.name AS team2, s.year AS season, l.name AS league,
-               m.home_team_id, m.away_team_id, m.status
+    cur.execute("""
+        SELECT
+            m.match_id,
+            TO_CHAR(m.utc_date, 'YYYY-MM-DD HH24:MI') AS display_date,
+            t1.name AS home_team_name,
+            t2.name AS away_team_name,
+            s.year AS season_year,
+            l.name AS league_name,
+            m.home_team_id,
+            m.away_team_id,
+            COALESCE(m.status, 'SCHEDULED') AS status,
+            TO_CHAR(m.utc_date, 'YYYY-MM-DD"T"HH24:MI') AS input_date,
+            m.season_id,
+            m.league_id,
+            mr.referee_id
         FROM matches m
         JOIN teams t1 ON m.home_team_id = t1.team_id
         JOIN teams t2 ON m.away_team_id = t2.team_id
         JOIN seasons s ON m.season_id = s.season_id
         JOIN leagues l ON m.league_id = l.league_id
-    ''')
+        LEFT JOIN match_referees mr ON m.match_id = mr.match_id
+        ORDER BY m.utc_date DESC, m.match_id DESC
+    """)
     matches = cur.fetchall()
-    cur.execute('SELECT team_id, name FROM teams')
+
+    cur.execute("""
+        SELECT team_id, name
+        FROM teams
+        ORDER BY name ASC
+    """)
     teams = cur.fetchall()
-    cur.execute('SELECT season_id, year FROM seasons')
+
+    cur.execute("""
+        SELECT season_id, year
+        FROM seasons
+        ORDER BY year DESC
+    """)
     seasons = cur.fetchall()
-    cur.execute('SELECT league_id, name FROM leagues')
+
+    cur.execute("""
+        SELECT league_id, name
+        FROM leagues
+        ORDER BY name ASC
+    """)
     leagues = cur.fetchall()
+    
+    cur.execute("""
+        SELECT referee_id, name
+        FROM referees
+        ORDER BY name ASC
+    """)
+    referees = cur.fetchall()
+
     cur.close()
-    return render_template('manage_matches.html', matches=matches, teams=teams, seasons=seasons, leagues=leagues)
+
+    return render_template(
+        'manage_matches.html',
+        matches=matches,
+        teams=teams,
+        seasons=seasons,
+        leagues=leagues,
+        referees=referees
+    )
 
 
 def normalize_flag_url(flag_value):
@@ -1230,36 +1459,113 @@ def manage_referees():
 
     if request.method == 'POST':
         try:
-            referee_id = request.form.get('referee_id')
-            name = request.form['name']
-            nationality = request.form['nationality']
+            if 'delete' in request.form:
+                referee_id = (
+                    request.form.get('deleteItemId')
+                    or request.form.get('deleteEntityId')
+                    or request.form.get('item_id')
+                    or request.form.get('referee_id')
+                )
 
-            if 'submit' in request.form:
+                if not referee_id:
+                    flash('No referee selected for deletion', 'error')
+                    return redirect(url_for('admin.manage_referees'))
+
+                cur.execute(
+                    "SELECT COUNT(*) FROM match_referees WHERE referee_id = %s",
+                    (referee_id,)
+                )
+                matches_result = cur.fetchone()
+                matches_count = matches_result[0] if matches_result else 0
+
+                if matches_count > 0:
+                    flash(
+                        f'This referee cannot be deleted because it is assigned to {matches_count} match(es).',
+                        'warning'
+                    )
+                else:
+                    cur.execute(
+                        "DELETE FROM referees WHERE referee_id = %s",
+                        (referee_id,)
+                    )
+                    flash('Referee deleted successfully', 'success')
+
+            else:
+                referee_id = request.form.get('referee_id')
+                name = clean_value(request.form.get('name'))
+                nationality = clean_value(request.form.get('nationality'))
+
+                if not name:
+                    flash('Referee name is required', 'error')
+                    return redirect(url_for('admin.manage_referees'))
+
+                if not nationality:
+                    flash('Nationality is required', 'error')
+                    return redirect(url_for('admin.manage_referees'))
+
                 if referee_id:
-                    cur.execute('UPDATE referees SET name = %s, nationality = %s WHERE referee_id = %s', 
-                                (name, nationality, referee_id))
+                    cur.execute("""
+                        SELECT referee_id
+                        FROM referees
+                        WHERE LOWER(name) = LOWER(%s)
+                          AND LOWER(nationality) = LOWER(%s)
+                          AND referee_id <> %s
+                    """, (name, nationality, referee_id))
+                else:
+                    cur.execute("""
+                        SELECT referee_id
+                        FROM referees
+                        WHERE LOWER(name) = LOWER(%s)
+                          AND LOWER(nationality) = LOWER(%s)
+                    """, (name, nationality))
+
+                existing = cur.fetchone()
+
+                if existing:
+                    flash('This referee already exists.', 'warning')
+                    return redirect(url_for('admin.manage_referees'))
+
+                if referee_id:
+                    cur.execute("""
+                        UPDATE referees
+                        SET name = %s,
+                            nationality = %s
+                        WHERE referee_id = %s
+                    """, (name, nationality, referee_id))
+
                     flash('Referee updated successfully', 'success')
                 else:
-                    cur.execute('INSERT INTO referees (name, nationality) VALUES (%s, %s)', 
-                                (name, nationality))
+                    cur.execute("""
+                        INSERT INTO referees (name, nationality)
+                        VALUES (%s, %s)
+                    """, (name, nationality))
+
                     flash('Referee added successfully', 'success')
-            elif 'delete' in request.form:
-                referee_id = request.form['deleteEntityId']
-                cur.execute('DELETE FROM referees WHERE referee_id = %s', (referee_id,))
-                flash('Referee deleted successfully', 'success')
+
             db.commit()
+
         except Exception as e:
             db.rollback()
             flash('An error occurred: ' + str(e), 'error')
+
         finally:
             cur.close()
+
         return redirect(url_for('admin.manage_referees'))
 
-    cur.execute('SELECT referee_id, name, nationality FROM referees')
+    cur.execute("""
+        SELECT referee_id, name, nationality
+        FROM referees
+        ORDER BY referee_id
+    """)
     referees = cur.fetchall()
-    cur.close()
-    return render_template('manage_referees.html', referees=referees)
 
+    cur.close()
+
+    return render_template(
+        'manage_referees.html',
+        referees=referees
+    )
 
 
 @admin_bp.route('/manage_scorers', methods=['GET', 'POST'])
@@ -1270,51 +1576,173 @@ def manage_scorers():
 
     if request.method == 'POST':
         try:
-            scorer_id = request.form.get('scorer_id')
-            player_id = request.form['player_id']
-            season_id = request.form['season_id']
-            league_id = request.form['league_id']
-            goals = request.form['goals']
-            assists = request.form['assists']
-            penalties = request.form['penalties']
+            if 'delete' in request.form:
+                scorer_id = (
+                    request.form.get('deleteItemId')
+                    or request.form.get('deleteEntityId')
+                    or request.form.get('item_id')
+                    or request.form.get('scorer_id')
+                )
 
-            if 'submit' in request.form:
+                if not scorer_id:
+                    flash('No scorer selected for deletion', 'error')
+                    return redirect(url_for('admin.manage_scorers'))
+
+                cur.execute("DELETE FROM scorers WHERE scorer_id = %s", (scorer_id,))
+                flash('Scorer deleted successfully', 'success')
+
+            else:
+                scorer_id = request.form.get('scorer_id')
+                player_id = clean_value(request.form.get('player_id'))
+                season_id = clean_value(request.form.get('season_id'))
+                league_id = clean_value(request.form.get('league_id'))
+                goals = clean_int(request.form.get('goals'))
+                assists = clean_int(request.form.get('assists'))
+                penalties = clean_int(request.form.get('penalties'))
+
+                if not player_id:
+                    flash('Player is required', 'error')
+                    return redirect(url_for('admin.manage_scorers'))
+
+                if not season_id:
+                    flash('Season is required', 'error')
+                    return redirect(url_for('admin.manage_scorers'))
+
+                if not league_id:
+                    flash('League is required', 'error')
+                    return redirect(url_for('admin.manage_scorers'))
+
+                scorer_values = [goals, assists, penalties]
+
+                if any(value is None for value in scorer_values):
+                    flash('Goals, assists and penalties are required', 'error')
+                    return redirect(url_for('admin.manage_scorers'))
+
+                if any(value is not None and value < 0 for value in scorer_values):
+                    flash('Goals, assists and penalties cannot be negative', 'warning')
+                    return redirect(url_for('admin.manage_scorers'))
+
                 if scorer_id:
-                    cur.execute('UPDATE scorers SET player_id = %s, season_id = %s, league_id = %s, goals = %s, assists = %s, penalties = %s WHERE scorer_id = %s',
-                                (player_id, season_id, league_id, goals, assists, penalties, scorer_id))
+                    cur.execute("""
+                        SELECT scorer_id
+                        FROM scorers
+                        WHERE player_id = %s
+                          AND season_id = %s
+                          AND league_id = %s
+                          AND scorer_id <> %s
+                    """, (player_id, season_id, league_id, scorer_id))
+                else:
+                    cur.execute("""
+                        SELECT scorer_id
+                        FROM scorers
+                        WHERE player_id = %s
+                          AND season_id = %s
+                          AND league_id = %s
+                    """, (player_id, season_id, league_id))
+
+                existing = cur.fetchone()
+
+                if existing:
+                    flash('This scorer already exists for the selected player, season and league.', 'warning')
+                    return redirect(url_for('admin.manage_scorers'))
+
+                if scorer_id:
+                    cur.execute("""
+                        UPDATE scorers
+                        SET player_id = %s,
+                            season_id = %s,
+                            league_id = %s,
+                            goals = %s,
+                            assists = %s,
+                            penalties = %s
+                        WHERE scorer_id = %s
+                    """, (
+                        player_id,
+                        season_id,
+                        league_id,
+                        goals,
+                        assists,
+                        penalties,
+                        scorer_id
+                    ))
                     flash('Scorer updated successfully', 'success')
                 else:
-                    cur.execute('INSERT INTO scorers (player_id, season_id, league_id, goals, assists, penalties) VALUES (%s, %s, %s, %s, %s, %s)',
-                                (player_id, season_id, league_id, goals, assists, penalties))
+                    cur.execute("""
+                        INSERT INTO scorers
+                            (player_id, season_id, league_id, goals, assists, penalties)
+                        VALUES
+                            (%s, %s, %s, %s, %s, %s)
+                    """, (
+                        player_id,
+                        season_id,
+                        league_id,
+                        goals,
+                        assists,
+                        penalties
+                    ))
                     flash('Scorer added successfully', 'success')
-            elif 'delete' in request.form:
-                scorer_id = request.form['deleteEntityId']
-                cur.execute('DELETE FROM scorers WHERE scorer_id = %s', (scorer_id,))
-                flash('Scorer deleted successfully', 'success')
+
             db.commit()
+
         except Exception as e:
             db.rollback()
             flash('An error occurred: ' + str(e), 'error')
+
         finally:
             cur.close()
+
         return redirect(url_for('admin.manage_scorers'))
 
-    cur.execute('''
-        SELECT s.scorer_id, p.name, se.year, l.name, s.goals, s.assists, s.penalties 
-        FROM scorers s 
-        JOIN players p ON s.player_id = p.player_id 
-        JOIN seasons se ON s.season_id = se.season_id 
-        JOIN leagues l ON s.league_id = l.league_id
-    ''')
+    cur.execute("""
+        SELECT
+            sc.scorer_id,
+            p.name AS player_name,
+            se.year AS season_year,
+            l.name AS league_name,
+            sc.goals,
+            sc.assists,
+            sc.penalties,
+            sc.player_id,
+            sc.season_id,
+            sc.league_id
+        FROM scorers sc
+        JOIN players p ON sc.player_id = p.player_id
+        JOIN seasons se ON sc.season_id = se.season_id
+        JOIN leagues l ON sc.league_id = l.league_id
+        ORDER BY sc.goals DESC, sc.scorer_id DESC
+    """)
     scorers = cur.fetchall()
-    cur.execute('SELECT player_id, name FROM players')
+
+    cur.execute("""
+        SELECT player_id, name
+        FROM players
+        ORDER BY name ASC
+    """)
     players = cur.fetchall()
-    cur.execute('SELECT season_id, year FROM seasons')
+
+    cur.execute("""
+        SELECT season_id, year
+        FROM seasons
+        ORDER BY year DESC
+    """)
     seasons = cur.fetchall()
-    cur.execute('SELECT league_id, name FROM leagues')
+
+    cur.execute("""
+        SELECT league_id, name
+        FROM leagues
+        ORDER BY name ASC
+    """)
     leagues = cur.fetchall()
+
     cur.close()
-    return render_template('manage_scorers.html', scorers=scorers, players=players, seasons=seasons, leagues=leagues)
+
+    return render_template(
+        'manage_scorers.html',
+        scorers=scorers,
+        players=players,
+        seasons=seasons,
+        leagues=leagues
+    )
 
 
 
@@ -1326,71 +1754,203 @@ def manage_scores():
 
     if request.method == 'POST':
         try:
-            score_id = request.form.get('score_id')
-            match_id = request.form['match_id']
-            full_time_home = request.form['full_time_home']
-            full_time_away = request.form['full_time_away']
-            half_time_home = request.form['half_time_home']
-            half_time_away = request.form['half_time_away']
-            new_home = int(full_time_home) if full_time_home != '' else None
-            new_away = int(full_time_away) if full_time_away != '' else None
+            if 'delete' in request.form:
+                score_id = (
+                    request.form.get('deleteItemId')
+                    or request.form.get('deleteEntityId')
+                    or request.form.get('item_id')
+                    or request.form.get('score_id')
+                )
 
-            cur.execute(
-                """
-                SELECT m.status, s.full_time_home, s.full_time_away,
-                       m.home_team_id, m.away_team_id, m.league_id
-                FROM matches m
-                LEFT JOIN scores s ON m.match_id = s.match_id
-                WHERE m.match_id = %s
-                """,
-                (match_id,),
-            )
-            match_row = cur.fetchone()
+                if not score_id:
+                    flash('No score selected for deletion', 'error')
+                    return redirect(url_for('admin.manage_scores'))
 
-            if 'submit' in request.form:
+                cur.execute("DELETE FROM scores WHERE score_id = %s", (score_id,))
+                flash('Score deleted successfully', 'success')
+
+            else:
+                score_id = request.form.get('score_id')
+                match_id = clean_value(request.form.get('match_id'))
+                full_time_home = clean_int(request.form.get('full_time_home'))
+                full_time_away = clean_int(request.form.get('full_time_away'))
+                half_time_home = clean_int(request.form.get('half_time_home'))
+                half_time_away = clean_int(request.form.get('half_time_away'))
+
+                if not match_id:
+                    flash('Match is required', 'error')
+                    return redirect(url_for('admin.manage_scores'))
+
+                score_values = [
+                    full_time_home,
+                    full_time_away,
+                    half_time_home,
+                    half_time_away
+                ]
+
+                if any(value is None for value in score_values):
+                    flash('All score fields are required', 'error')
+                    return redirect(url_for('admin.manage_scores'))
+
+                if any(value is not None and value < 0 for value in score_values):
+                    flash('Score values cannot be negative', 'warning')
+                    return redirect(url_for('admin.manage_scores'))
+
+                if (
+                    half_time_home is not None
+                    and full_time_home is not None
+                    and half_time_away is not None
+                    and full_time_away is not None
+                ):
+                    if half_time_home > full_time_home or half_time_away > full_time_away:
+                        flash('Half time score cannot be greater than full time score.', 'warning')
+                        return redirect(url_for('admin.manage_scores'))
+
+                cur.execute("""
+                    SELECT
+                        m.status,
+                        s.full_time_home,
+                        s.full_time_away,
+                        m.home_team_id,
+                        m.away_team_id,
+                        m.league_id
+                    FROM matches m
+                    LEFT JOIN scores s ON m.match_id = s.match_id
+                    WHERE m.match_id = %s
+                """, (match_id,))
+                match_row = cur.fetchone()
+
+                if not match_row:
+                    flash('Selected match does not exist', 'error')
+                    return redirect(url_for('admin.manage_scores'))
+
                 if score_id:
-                    cur.execute('UPDATE scores SET match_id = %s, full_time_home = %s, full_time_away = %s, half_time_home = %s, half_time_away = %s WHERE score_id = %s',
-                                (match_id, full_time_home, full_time_away, half_time_home, half_time_away, score_id))
+                    cur.execute("""
+                        SELECT score_id
+                        FROM scores
+                        WHERE match_id = %s
+                          AND score_id <> %s
+                    """, (match_id, score_id))
+                else:
+                    cur.execute("""
+                        SELECT score_id
+                        FROM scores
+                        WHERE match_id = %s
+                    """, (match_id,))
+
+                existing = cur.fetchone()
+
+                if existing:
+                    flash('This match already has a score.', 'warning')
+                    return redirect(url_for('admin.manage_scores'))
+
+                if score_id:
+                    cur.execute("""
+                        UPDATE scores
+                        SET match_id = %s,
+                            full_time_home = %s,
+                            full_time_away = %s,
+                            half_time_home = %s,
+                            half_time_away = %s
+                        WHERE score_id = %s
+                    """, (
+                        match_id,
+                        full_time_home,
+                        full_time_away,
+                        half_time_home,
+                        half_time_away,
+                        score_id
+                    ))
                     flash('Score updated successfully', 'success')
                 else:
-                    cur.execute('INSERT INTO scores (match_id, full_time_home, full_time_away, half_time_home, half_time_away) VALUES (%s, %s, %s, %s, %s)',
-                                (match_id, full_time_home, full_time_away, half_time_home, half_time_away))
+                    cur.execute("""
+                        INSERT INTO scores
+                            (match_id, full_time_home, full_time_away, half_time_home, half_time_away)
+                        VALUES
+                            (%s, %s, %s, %s, %s)
+                    """, (
+                        match_id,
+                        full_time_home,
+                        full_time_away,
+                        half_time_home,
+                        half_time_away
+                    ))
                     flash('Score added successfully', 'success')
 
-                if match_row:
-                    from notification_service import process_match_notification_events
+                from notification_service import process_match_notification_events
 
-                    process_match_notification_events(
-                        cur,
-                        int(match_id),
-                        match_row[3],
-                        match_row[4],
-                        match_row[5],
-                        match_row[0],
-                        match_row[0],
-                        match_row[1],
-                        match_row[2],
-                        new_home,
-                        new_away,
-                    )
-            elif 'delete' in request.form:
-                score_id = request.form['deleteEntityId']
-                cur.execute('DELETE FROM scores WHERE score_id = %s', (score_id,))
-                flash('Score deleted successfully', 'success')
+                process_match_notification_events(
+                    cur,
+                    int(match_id),
+                    match_row[3],
+                    match_row[4],
+                    match_row[5],
+                    match_row[0],
+                    match_row[0],
+                    match_row[1],
+                    match_row[2],
+                    full_time_home,
+                    full_time_away,
+                )
+
             db.commit()
+
         except Exception as e:
             db.rollback()
             flash('An error occurred: ' + str(e), 'error')
+
         finally:
             cur.close()
+
         return redirect(url_for('admin.manage_scores'))
 
-    cur.execute('SELECT s.score_id, m.utc_date, s.full_time_home, s.full_time_away, s.half_time_home, s.half_time_away FROM scores s JOIN matches m ON s.match_id = m.match_id')
+    cur.execute("""
+        SELECT
+            s.score_id,
+            CONCAT(
+                TO_CHAR(m.utc_date, 'YYYY-MM-DD'),
+                ' - ',
+                t1.name,
+                ' vs ',
+                t2.name
+            ) AS match_label,
+            s.full_time_home,
+            s.full_time_away,
+            s.half_time_home,
+            s.half_time_away,
+            s.match_id
+        FROM scores s
+        JOIN matches m ON s.match_id = m.match_id
+        JOIN teams t1 ON m.home_team_id = t1.team_id
+        JOIN teams t2 ON m.away_team_id = t2.team_id
+        ORDER BY m.utc_date DESC, s.score_id DESC
+    """)
     scores = cur.fetchall()
-    cur.execute('SELECT match_id, utc_date FROM matches')
+
+    cur.execute("""
+        SELECT
+            m.match_id,
+            CONCAT(
+                TO_CHAR(m.utc_date, 'YYYY-MM-DD'),
+                ' - ',
+                t1.name,
+                ' vs ',
+                t2.name
+            ) AS match_label
+        FROM matches m
+        JOIN teams t1 ON m.home_team_id = t1.team_id
+        JOIN teams t2 ON m.away_team_id = t2.team_id
+        ORDER BY m.utc_date DESC, m.match_id DESC
+    """)
     matches = cur.fetchall()
+
     cur.close()
-    return render_template('manage_scores.html', scores=scores, matches=matches)
+
+    return render_template(
+        'manage_scores.html',
+        scores=scores,
+        matches=matches
+    )
 
 
 
@@ -1402,54 +1962,285 @@ def manage_standings():
 
     if request.method == 'POST':
         try:
-            standing_id = request.form.get('standing_id')
-            position = request.form['position']
-            team_id = request.form['team_id']
-            played_games = request.form['played_games']
-            won = request.form['won']
-            draw = request.form['draw']
-            lost = request.form['lost']
-            points = request.form['points']
-            goals_for = request.form['goals_for']
-            goals_against = request.form['goals_against']
-            goal_difference = request.form['goal_difference']
-            form = request.form['form']
+            from notification_service import notify_standings_change
+            if 'delete' in request.form:
+                standing_id = (
+                    request.form.get('deleteItemId')
+                    or request.form.get('deleteEntityId')
+                    or request.form.get('item_id')
+                    or request.form.get('standing_id')
+                )
 
-            if 'add' in request.form:
-                cur.execute('''
-                    INSERT INTO standings (position, team_id, played_games, won, draw, lost, points, goals_for, goals_against, goal_difference, form)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ''', (position, team_id, played_games, won, draw, lost, points, goals_for, goals_against, goal_difference, form))
-                flash('Standing added successfully', 'success')
-            elif 'edit' in request.form and standing_id:
-                cur.execute('''
-                    UPDATE standings
-                    SET position = %s, team_id = %s, played_games = %s, won = %s, draw = %s, lost = %s, points = %s, goals_for = %s, goals_against = %s, goal_difference = %s, form = %s
-                    WHERE standing_id = %s
-                ''', (position, team_id, played_games, won, draw, lost, points, goals_for, goals_against, goal_difference, form, standing_id))
-                flash('Standing updated successfully', 'success')
-            elif 'delete' in request.form:
-                standing_id = request.form['deleteItemId']
-                cur.execute('DELETE FROM standings WHERE standing_id = %s', (standing_id,))
+                if not standing_id:
+                    flash('No standing selected for deletion', 'error')
+                    return redirect(url_for('admin.manage_standings'))
+
+                cur.execute("DELETE FROM standings WHERE standing_id = %s", (standing_id,))
                 flash('Standing deleted successfully', 'success')
+
+            else:
+                standing_id = request.form.get('standing_id')
+                position = clean_int(request.form.get('position'))
+                team_id = clean_value(request.form.get('team_id'))
+                league_id = clean_value(request.form.get('league_id'))
+                season_id = clean_value(request.form.get('season_id'))
+                played_games = clean_int(request.form.get('played_games'))
+                won = clean_int(request.form.get('won'))
+                draw = clean_int(request.form.get('draw'))
+                lost = clean_int(request.form.get('lost'))
+                points = clean_int(request.form.get('points'))
+                goals_for = clean_int(request.form.get('goals_for'))
+                goals_against = clean_int(request.form.get('goals_against'))
+                goal_difference = clean_int(request.form.get('goal_difference'))
+                form = clean_value(request.form.get('form'))
+
+                if form:
+                    form = form.strip().upper()
+
+                    if form.startswith("{") and form.endswith("}"):
+                        form = form
+                    else:
+                        form = form.replace("[", "")
+                        form = form.replace("]", "")
+                        form = form.replace("'", "")
+                        form = form.replace('"', "")
+                        form = form.replace(",", "")
+                        form = form.replace(" ", "")
+                        form = "{" + ",".join(list(form)) + "}"
+
+                if not team_id:
+                    flash('Team is required', 'error')
+                    return redirect(url_for('admin.manage_standings'))
+
+                if not league_id:
+                    flash('League is required', 'error')
+                    return redirect(url_for('admin.manage_standings'))
+
+                if not season_id:
+                    flash('Season is required', 'error')
+                    return redirect(url_for('admin.manage_standings'))
+
+                number_values = [
+                    position,
+                    played_games,
+                    won,
+                    draw,
+                    lost,
+                    points,
+                    goals_for,
+                    goals_against,
+                    goal_difference
+                ]
+
+                if any(value is None for value in number_values):
+                    flash('All numeric fields are required', 'error')
+                    return redirect(url_for('admin.manage_standings'))
+
+                non_negative_values = [
+                    position,
+                    played_games,
+                    won,
+                    draw,
+                    lost,
+                    points,
+                    goals_for,
+                    goals_against
+                ]
+
+                if any(value is not None and value < 0 for value in non_negative_values):
+                    flash('Numeric values cannot be negative.', 'warning')
+                    return redirect(url_for('admin.manage_standings'))
+
+                if position is not None and position < 1:
+                    flash('Position must be at least 1.', 'warning')
+                    return redirect(url_for('admin.manage_standings'))
+
+                if (
+                    played_games is not None
+                    and won is not None
+                    and draw is not None
+                    and lost is not None
+                    and played_games != won + draw + lost
+                ):
+                    flash('Played games must be equal to won + draw + lost.', 'warning')
+                    return redirect(url_for('admin.manage_standings'))
+
+                if (
+                    goals_for is not None
+                    and goals_against is not None
+                    and goal_difference is not None
+                    and goal_difference != goals_for - goals_against
+                ):
+                    flash('Goal difference must be goals for minus goals against.', 'warning')
+                    return redirect(url_for('admin.manage_standings'))
+
+                if standing_id:
+                    cur.execute("""
+                        SELECT standing_id
+                        FROM standings
+                        WHERE team_id = %s
+                          AND league_id = %s
+                          AND season_id = %s
+                          AND standing_id <> %s
+                    """, (team_id, league_id, season_id, standing_id))
+                else:
+                    cur.execute("""
+                        SELECT standing_id
+                        FROM standings
+                        WHERE team_id = %s
+                          AND league_id = %s
+                          AND season_id = %s
+                    """, (team_id, league_id, season_id))
+
+                existing = cur.fetchone()
+
+                if existing:
+                    flash('This team already has a standing record for the selected league and season.', 'warning')
+                    return redirect(url_for('admin.manage_standings'))
+
+                if standing_id:
+                    cur.execute("""
+                        SELECT team_id, position
+                        FROM standings
+                        WHERE standing_id = %s
+                    """, (standing_id,))
+
+                    old_standing = cur.fetchone()
+
+                    old_team_id = old_standing[0] if old_standing else team_id
+                    old_position = old_standing[1] if old_standing else None
+                    cur.execute("""
+                        UPDATE standings
+                        SET league_id = %s,
+                            season_id = %s,
+                            position = %s,
+                            team_id = %s,
+                            played_games = %s,
+                            won = %s,
+                            draw = %s,
+                            lost = %s,
+                            points = %s,
+                            goals_for = %s,
+                            goals_against = %s,
+                            goal_difference = %s,
+                            form = %s
+                        WHERE standing_id = %s
+                    """, (
+                        league_id,
+                        season_id,
+                        position,
+                        team_id,
+                        played_games,
+                        won,
+                        draw,
+                        lost,
+                        points,
+                        goals_for,
+                        goals_against,
+                        goal_difference,
+                        form,
+                        standing_id
+                    ))
+                    notify_standings_change(
+                        cur,
+                        int(old_team_id),
+                        int(old_position) if old_position is not None else None,
+                        int(position) if position is not None else None
+                    )
+                    flash('Standing updated successfully', 'success')
+                else:
+                    cur.execute("""
+                        INSERT INTO standings
+                            (league_id, season_id, position, team_id, played_games,
+                             won, draw, lost, points, goals_for, goals_against,
+                             goal_difference, form)
+                        VALUES
+                            (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        league_id,
+                        season_id,
+                        position,
+                        team_id,
+                        played_games,
+                        won,
+                        draw,
+                        lost,
+                        points,
+                        goals_for,
+                        goals_against,
+                        goal_difference,
+                        form
+                    ))
+                    flash('Standing added successfully', 'success')
+
             db.commit()
+
         except Exception as e:
             db.rollback()
             flash('An error occurred: ' + str(e), 'error')
+
         finally:
             cur.close()
+
         return redirect(url_for('admin.manage_standings'))
 
-    cur.execute('''
-        SELECT s.standing_id, s.position, t.name, s.played_games, s.won, s.draw, s.lost, s.points, s.goals_for, s.goals_against, s.goal_difference, s.form, s.team_id
+    cur.execute("""
+        SELECT
+            s.standing_id,
+            s.position,
+            t.name AS team_name,
+            s.played_games,
+            s.won,
+            s.draw,
+            s.lost,
+            s.points,
+            s.goals_for,
+            s.goals_against,
+            s.goal_difference,
+            COALESCE(array_to_string(s.form, ''), '') AS form,
+            s.team_id,
+            s.league_id,
+            s.season_id,
+            l.name AS league_name,
+            se.year AS season_year
         FROM standings s
         JOIN teams t ON s.team_id = t.team_id
-    ''')
+        JOIN leagues l ON s.league_id = l.league_id
+        JOIN seasons se ON s.season_id = se.season_id
+        ORDER BY l.name ASC, se.year DESC, s.position ASC
+    """)
     standings = cur.fetchall()
-    cur.execute('SELECT team_id, name FROM teams')
+
+    cur.execute("""
+        SELECT team_id, name
+        FROM teams
+        ORDER BY name ASC
+    """)
     teams = cur.fetchall()
+
+    cur.execute("""
+        SELECT league_id, name
+        FROM leagues
+        ORDER BY name ASC
+    """)
+    leagues = cur.fetchall()
+
+    cur.execute("""
+        SELECT season_id, year
+        FROM seasons
+        ORDER BY year DESC
+    """)
+    seasons = cur.fetchall()
+
     cur.close()
-    return render_template('manage_standings.html', standings=standings, teams=teams)
+
+    return render_template(
+        'manage_standings.html',
+        standings=standings,
+        teams=teams,
+        leagues=leagues,
+        seasons=seasons
+    )
 
 @admin_bp.route('/manage_users', methods=['GET', 'POST'])
 @admin_required
@@ -1460,23 +2251,61 @@ def manage_users():
     if request.method == 'POST':
         try:
             user_id = request.form.get('user_id')
-            is_admin = request.form.get('is_admin') == 'true'
+            is_admin_value = request.form.get('is_admin')
+            is_admin = is_admin_value == 'true'
 
-            cur.execute('UPDATE users SET is_admin = %s WHERE user_id = %s', (is_admin, user_id))
+            if not user_id:
+                flash('No user selected', 'error')
+                return redirect(url_for('admin.manage_users'))
+
+            cur.execute("""
+                SELECT user_id, username, is_admin
+                FROM users
+                WHERE user_id = %s
+            """, (user_id,))
+            selected_user = cur.fetchone()
+
+            if not selected_user:
+                flash('Selected user does not exist', 'error')
+                return redirect(url_for('admin.manage_users'))
+
+            current_user_id = session.get('user_id')
+
+            if str(user_id) == str(current_user_id) and not is_admin:
+                flash('You cannot remove your own admin privileges.', 'warning')
+                return redirect(url_for('admin.manage_users'))
+
+            cur.execute("""
+                UPDATE users
+                SET is_admin = %s
+                WHERE user_id = %s
+            """, (is_admin, user_id))
+
             db.commit()
             flash('User privilege updated successfully', 'success')
+
         except Exception as e:
             db.rollback()
             flash('An error occurred: ' + str(e), 'error')
+
         finally:
             cur.close()
+
         return redirect(url_for('admin.manage_users'))
 
-    cur.execute('SELECT user_id, username, is_admin FROM users')
+    cur.execute("""
+        SELECT user_id, username, is_admin
+        FROM users
+        ORDER BY user_id ASC
+    """)
     users = cur.fetchall()
+
     cur.close()
 
-    return render_template('manage_users.html', users=users)
+    return render_template(
+        'manage_users.html',
+        users=users
+    )
 
 @admin_bp.route('/sync_api/matches', methods=['POST'])
 @admin_required

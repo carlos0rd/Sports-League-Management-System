@@ -14,43 +14,62 @@
                 <input type="hidden" id="standing_id" name="standing_id">
                 <div class="form-group">
                     <label for="position">Position:</label>
-                    <input type="number" class="form-control" id="position" name="position" required>
+                    <input type="number" class="form-control" id="position" name="position" min="1" required>
                 </div>
                 <div class="form-group">
                     <label for="team_id">Team:</label>
                     <select class="form-control" id="team_id" name="team_id" required>
-                        {% for team in teams %}
-                        <option value="{{ team[0] }}">{{ team[1] }}</option>
-                        {% endfor %}
-                    </select>
+    <option value="">Select team</option>
+    {% for team in teams %}
+        <option value="{{ team[0] }}">{{ team[1] }}</option>
+    {% endfor %}
+</select>
                 </div>
+                <div class="form-group">
+    <label for="league_id">League:</label>
+    <select class="form-control" id="league_id" name="league_id" required>
+        <option value="">Select league</option>
+        {% for league in leagues %}
+            <option value="{{ league[0] }}">{{ league[1] }}</option>
+        {% endfor %}
+    </select>
+</div>
+
+<div class="form-group">
+    <label for="season_id">Season:</label>
+    <select class="form-control" id="season_id" name="season_id" required>
+        <option value="">Select season</option>
+        {% for season in seasons %}
+            <option value="{{ season[0] }}">{{ season[1] }}</option>
+        {% endfor %}
+    </select>
+</div>
                 <div class="form-group">
                     <label for="played_games">Played Games:</label>
-                    <input type="number" class="form-control" id="played_games" name="played_games" required>
-                </div>
+                    <input type="number" class="form-control" id="played_games" name="played_games" min="0" required>
                 <div class="form-group">
                     <label for="won">Won:</label>
-                    <input type="number" class="form-control" id="won" name="won" required>
+                    <input type="number" class="form-control" id="won" name="won" min="0" required>
                 </div>
                 <div class="form-group">
                     <label for="draw">Draw:</label>
-                    <input type="number" class="form-control" id="draw" name="draw" required>
+                    <input type="number" class="form-control" id="draw" name="draw" min="0" required>
                 </div>
                 <div class="form-group">
                     <label for="lost">Lost:</label>
-                    <input type="number" class="form-control" id="lost" name="lost" required>
+                    <input type="number" class="form-control" id="lost" name="lost" min="0" required>
                 </div>
                 <div class="form-group">
                     <label for="points">Points:</label>
-                    <input type="number" class="form-control" id="points" name="points" required>
+                    <input type="number" class="form-control" id="points" name="points" min="0" required>
                 </div>
                 <div class="form-group">
                     <label for="goals_for">Goals For:</label>
-                    <input type="number" class="form-control" id="goals_for" name="goals_for" required>
+                    <input type="number" class="form-control" id="goals_for" name="goals_for" min="0" required>
                 </div>
                 <div class="form-group">
                     <label for="goals_against">Goals Against:</label>
-                    <input type="number" class="form-control" id="goals_against" name="goals_against" required>
+                    <input type="number" class="form-control" id="goals_against" name="goals_against" min="0" required>
                 </div>
                 <div class="form-group">
                     <label for="goal_difference">Goal Difference:</label>
@@ -60,7 +79,9 @@
                     <label for="form">Form:</label>
                     <input type="text" class="form-control" id="form" name="form" required>
                 </div>
-                <button type="submit" name="add" class="btn btn-primary" id="submit-button">Add Standing</button>
+                <button type="submit" name="submit" class="btn btn-primary" id="submit-button">
+    Add Standing
+</button>
             </form>
                 </div>
             </div>
@@ -101,14 +122,39 @@
                         <td>{{ standing[10] }}</td>
                         <td>{{ standing[11] }}</td>
                         <td>
-                            <button class="btn btn-success btn-sm" onclick="editStanding('{{ standing[0] }}', '{{ standing[1] }}', '{{ standing[12] }}', '{{ standing[3] }}', '{{ standing[4] }}', '{{ standing[5] }}', '{{ standing[6] }}', '{{ standing[7] }}', '{{ standing[8] }}', '{{ standing[9] }}', '{{ standing[10] }}', '{{ standing[11] }}')">
-                                <i class="fa fa-pencil-alt"></i>
-                            </button>
+                            <button
+    type="button"
+    class="btn btn-success btn-sm edit-standing-btn"
+    data-id="{{ standing[0] }}"
+    data-position="{{ standing[1] }}"
+    data-team-id="{{ standing[12] or '' }}"
+    data-league-id="{{ standing[13] or '' }}"
+    data-season-id="{{ standing[14] or '' }}"
+    data-played-games="{{ standing[3] or 0 }}"
+    data-won="{{ standing[4] or 0 }}"
+    data-draw="{{ standing[5] or 0 }}"
+    data-lost="{{ standing[6] or 0 }}"
+    data-points="{{ standing[7] or 0 }}"
+    data-goals-for="{{ standing[8] or 0 }}"
+    data-goals-against="{{ standing[9] or 0 }}"
+    data-goal-difference="{{ standing[10] or 0 }}"
+    data-form="{{ standing[11] or '' }}">
+    <i class="fa fa-pencil-alt"></i>
+</button>
                         </td>
                         <td>
-                            <button class="btn btn-danger btn-sm" data-toggle="modal" data-target="#deleteModal" data-id="{{ standing[0] }}" data-action="{{ url_for('admin.manage_standings') }}">
-                                <i class="fa fa-minus"></i>
-                            </button>
+                            <form
+    action="{{ url_for('admin.manage_standings') }}"
+    method="POST"
+    style="display:inline;"
+    onsubmit="return confirm('Are you sure you want to delete this standing?');">
+
+    <input type="hidden" name="deleteItemId" value="{{ standing[0] }}">
+
+    <button type="submit" name="delete" class="btn btn-danger btn-sm">
+        <i class="fa fa-minus"></i>
+    </button>
+</form>
                         </td>
                     </tr>
                     {% endfor %}
@@ -118,54 +164,28 @@
         </div>
     </div>
 
-<!-- Delete Modal -->
-<div class="modal fade" id="deleteModal" tabindex="-1" role="dialog" aria-labelledby="deleteModalLabel" aria-hidden="true">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <form id="deleteForm" method="POST" action="">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="deleteModalLabel">Confirm Delete</h5>
-                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">&times;</span>
-                    </button>
-                </div>
-                <div class="modal-body">
-                    Are you sure you want to delete this item?
-                    <input type="hidden" id="deleteItemId" name="deleteItemId">
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-                    <button type="submit" name="delete" class="btn btn-danger">Delete</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
 
 <script>
-    function editStanding(id, position, team_id, played_games, won, draw, lost, points, goals_for, goals_against, goal_difference, form) {
-        document.getElementById('standing_id').value = id;
-        document.getElementById('position').value = position;
-        document.getElementById('team_id').value = team_id;
-        document.getElementById('played_games').value = played_games;
-        document.getElementById('won').value = won;
-        document.getElementById('draw').value = draw;
-        document.getElementById('lost').value = lost;
-        document.getElementById('points').value = points;
-        document.getElementById('goals_for').value = goals_for;
-        document.getElementById('goals_against').value = goals_against;
-        document.getElementById('goal_difference').value = goal_difference;
-        document.getElementById('form').value = form;
-        document.getElementById('submit-button').innerText = 'Update Standing';
-        document.getElementById('form-title').innerText = 'Edit Standing';
-    }
+    document.querySelectorAll('.edit-standing-btn').forEach(function(button) {
+        button.addEventListener('click', function() {
+            document.getElementById('standing_id').value = this.getAttribute('data-id');
+            document.getElementById('position').value = this.getAttribute('data-position') || '';
+            document.getElementById('team_id').value = this.getAttribute('data-team-id') || '';
+            document.getElementById('league_id').value = this.getAttribute('data-league-id') || '';
+            document.getElementById('season_id').value = this.getAttribute('data-season-id') || '';
+            document.getElementById('played_games').value = this.getAttribute('data-played-games') || 0;
+            document.getElementById('won').value = this.getAttribute('data-won') || 0;
+            document.getElementById('draw').value = this.getAttribute('data-draw') || 0;
+            document.getElementById('lost').value = this.getAttribute('data-lost') || 0;
+            document.getElementById('points').value = this.getAttribute('data-points') || 0;
+            document.getElementById('goals_for').value = this.getAttribute('data-goals-for') || 0;
+            document.getElementById('goals_against').value = this.getAttribute('data-goals-against') || 0;
+            document.getElementById('goal_difference').value = this.getAttribute('data-goal-difference') || 0;
+            document.getElementById('form').value = this.getAttribute('data-form') || '';
 
-    $('#deleteModal').on('show.bs.modal', function (event) {
-        var button = $(event.relatedTarget);
-        var id = button.data('id');
-        var action = button.data('action');
-        document.getElementById('deleteItemId').value = id;
-        document.getElementById('deleteForm').action = action;
+            document.getElementById('submit-button').innerText = 'Update Standing';
+            document.getElementById('form-title').innerText = 'Edit Standing';
+        });
     });
 </script>
 {% endblock %}

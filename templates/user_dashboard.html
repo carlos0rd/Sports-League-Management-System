@@ -457,4 +457,23 @@
     </div>
 </div>
 
+        
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    fetch("{{ url_for('user.trigger_notification_detection') }}", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        }
+    }).catch(function (error) {
+        console.error("Notification detection error:", error);
+    });
+});
+</script>
+
+
+
 {% endblock %}

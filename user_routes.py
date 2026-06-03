@@ -63,7 +63,13 @@ def user_dashboard():
 
         # 1. Upcoming match preview
         cur.execute(f"""
-            SELECT m.match_id, t1.name, t2.name, TO_CHAR(m.utc_date, 'Mon DD, HH24:MI'), t1.crestURL, t2.crestURL
+            SELECT 
+    m.match_id,
+    t1.name,
+    t2.name,
+    TO_CHAR(m.utc_date, 'Mon DD, YYYY HH24:MI'),
+    t1.crestURL,
+    t2.crestURL
             FROM matches m
             JOIN teams t1 ON m.home_team_id = t1.team_id
             JOIN teams t2 ON m.away_team_id = t2.team_id
